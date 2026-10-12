@@ -8,14 +8,15 @@ leverage. When a pitcher comes out, the engine reads the game situation,
 works out its leverage, and walks the tiers that fit it, preferring a
 platoon edge on the next batter, then the owner's order.
 
-Leverage here is an approximation of Tango's leverage index (1.0 = an
-average moment) from inning, score margin and base-out state. Milestone 8
-calibration can swap in the full table without changing this interface.
+Leverage is Tango's leverage index (1.0 = an average moment) read from his
+table by inning, half, score margin and base-out state; see leverage.py.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from npl_sim.engine import leverage as li_table
 
 ROLES = ("high", "medium", "low", "mopup", "long", "any")
 MOPUP_MARGIN = 5  # runs either way
@@ -54,22 +55,10 @@ class ReliefUsage:
 
 
 def leverage(inning: int, half: str, lead: int, bases: list, outs: int) -> float:
-    """Approximate leverage index for the fielding team, `lead` runs ahead.
-
-    Late and close is high (a one-run 9th is about 2-3), blowouts are near
-    zero, and runners on base raise it, more so with fewer outs.
-    """
-    margin = abs(lead)
-    closeness = {0: 1.0, 1: 0.9, 2: 0.62, 3: 0.4, 4: 0.24}.get(margin, 0.1)
-    if inning >= 9 and lead == 1:
-        closeness = 1.0  # save spot: the tying run is coming up
-    late = {7: 1.35, 8: 1.7}.get(inning, 2.1 if inning >= 9 else 0.85 + 0.05 * inning)
-    if half == "bottom" and inning >= 9:
-        late *= 1.1  # the home team can walk it off
-    on = sum(r is not None for r in bases)
-    scoring = sum(r is not None for r in bases[1:])
-    base_out = (1 + 0.28 * on + 0.12 * scoring) * (1.0 - 0.12 * outs)
-    return round(late * closeness * base_out, 2)
+    """Leverage index of the coming PA (Tango's table) for the fielding team,
+    `lead` runs ahead."""
+    home_lead = lead if half == "top" else -lead  # the home team fields in the top
+    return li_table.index(inning, half, home_lead, bases, outs)
 
 
 def situation(inning: int, lead: int, li: float, starter_out: bool) -> str:

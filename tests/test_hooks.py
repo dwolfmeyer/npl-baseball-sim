@@ -1,0 +1,72 @@
+from dataclasses import replace
+
+import pytest
+
+from npl_sim.engine.defaults import DEFAULT_ENV
+from npl_sim.engine.game import simulate_game
+from npl_sim.engine.hooks import StarterHook
+from npl_sim.engine.sample import average_team, pitcher
+
+NO_HOOK = StarterHook(max_runs=None, leverage=None)
+
+
+def test_reason_order_and_off_switches():
+    hook = StarterHook(times_through=3, max_runs=5, leverage=2.0, leverage_from_inning=7)
+    assert hook.reason(10, 2, 4, 3.0) is None  # big spot, but too early
+    assert hook.reason(10, 5, 2, 0.5) == "runs"
+    assert hook.reason(27, 0, 7, 0.5) == "times_through"
+    assert hook.reason(20, 1, 7, 2.0) == "leverage"
+    assert NO_HOOK.reason(40, 12, 9, 9.0) is None
+    with pytest.raises(ValueError):
+        StarterHook(max_runs=0)
+
+
+def starter_lines(events, team, starter):
+    """Runs charged to the starter before each PA he pitched, and the PAs."""
+    charged, before = 0, []
+    for e in events:
+        if e["type"] == "pa" and e["team"] != team and e["pitcher"] == starter:
+            before.append(charged)
+            charged += sum(1 for s in e["scored"] if s["pitcher"] == starter)
+    return before
+
+
+def test_runs_hook_pulls_a_starter_who_is_getting_hit():
+    # A batting-practice starter with a high pitch limit: only the runs hook
+    # gets him out.
+    bad = pitcher("Home-SP", limit=200, scale={"hr": 0.12, "k": 0.08})
+    home = replace(average_team("Home"), starter=bad, hook=StarterHook(max_runs=4, leverage=None))
+    pulled_for_runs = 0
+    for seed in range(60):
+        events = simulate_game(average_team("Away"), home, DEFAULT_ENV, seed)
+        assert all(r < 4 for r in starter_lines(events, "Home", "Home-SP"))
+        change = next(e for e in events if e["type"] == "pitching_change" and e["team"] == "Home")
+        pulled_for_runs += change["reason"] == "runs"
+    assert pulled_for_runs > 40
+
+
+def test_times_through_hook():
+    home = replace(average_team("Home"), hook=replace(NO_HOOK, times_through=2))
+    for seed in range(40):
+        events = simulate_game(average_team("Away"), home, DEFAULT_ENV, seed)
+        assert len(starter_lines(events, "Home", "Home-SP")) <= 18
+
+
+def test_leverage_hook_only_late_and_in_big_spots():
+    hook = StarterHook(max_runs=None, leverage=1.8, leverage_from_inning=6)
+    home = replace(average_team("Home"), hook=hook)
+    seen = 0
+    for seed in range(150):
+        events = simulate_game(average_team("Away"), home, DEFAULT_ENV, seed)
+        for e in events:
+            if e["type"] == "pitching_change" and e["team"] == "Home" and e["reason"] == "leverage":
+                assert e["out"] == "Home-SP" and e["inning"] >= 6 and e["leverage"] >= 1.8
+                seen += 1
+    assert seen > 10
+
+
+def test_no_hook_falls_back_to_pitch_count():
+    home = replace(average_team("Home"), hook=NO_HOOK)
+    events = simulate_game(average_team("Away"), home, DEFAULT_ENV, 3)
+    first = next(e for e in events if e["type"] == "pitching_change" and e["team"] == "Home")
+    assert first["reason"] == "pitch_count"
