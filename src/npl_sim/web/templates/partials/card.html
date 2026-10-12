@@ -128,6 +128,8 @@
   <p class="muted small">Bring a bench player in late for defense. Leave "Replaces" on "Whoever plays there" to sub for anyone at that position, or pick one starter to sub only for him. Saved on the card; the engine makes the switch once its substitution logic lands.</p>
   {% set starting = card.orders.values() | map("map", attribute=0) | map("list") | sum(start=[]) %}
   {% set sub_ids = card.subs | map(attribute="player") | list %}
+  {% set rhp_ids = card.orders.get("rhp", []) | map(attribute=0) | list %}
+  {% set lhp_ids = card.orders.get("lhp", []) | map(attribute=0) | list %}
   <div class="wrap"><table class="rotation">
     <tr><th>Replacement</th><th>Position</th><th>From</th><th>Replaces</th><th>Only when leading</th></tr>
     {% for i in range(sub_rows) %}
@@ -135,7 +137,7 @@
     <tr>
       <td><select id="sub_player_{{ i + 1 }}" name="sub_player_{{ i + 1 }}" aria-label="Defensive replacement {{ i + 1 }}">
         <option value="">None</option>
-        {% for h in hitters %}{% if (h.mlb_id in active and h.mlb_id not in sub_ids) or (sub and h.mlb_id == sub.player) %}
+        {% for h in hitters %}{% if (h.mlb_id in active and h.mlb_id not in sub_ids and not (h.mlb_id in rhp_ids and h.mlb_id in lhp_ids)) or (sub and h.mlb_id == sub.player) %}
         <option value="{{ h.mlb_id }}" {% if sub and h.mlb_id == sub.player %}selected{% endif %}>{{ h.name }} · {{ fields[h.mlb_id].positions | join(" ") or "DH" }}</option>
         {% endif %}{% endfor %}
       </select></td>
