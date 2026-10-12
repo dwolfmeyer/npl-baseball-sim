@@ -13,6 +13,7 @@ import random
 from dataclasses import dataclass, field
 
 from npl_sim.engine import detail
+from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
 
 # Mean pitches per PA by outcome.
@@ -60,7 +61,8 @@ class TeamCard:
     bullpen: list[Pitcher] = field(default_factory=list)
     defense: Defense = field(default_factory=Defense)
     park: ParkFactors | None = None  # used when this team is home
-    alignment: str = "normal"
+    # Owner's opt-in alignment rules, checked in order; none = straight up all game.
+    alignment_rules: tuple[AlignmentRule, ...] = ()
     steal_aggressiveness: float = 1.0  # 0 = never run, 1 = normal, 2 = aggressive
     abbr: str = ""  # short name for scores in the play log; defaults to the first 3 letters
 
@@ -105,6 +107,7 @@ class GameSim:
         self.outs = 0
         self.bases: list[Runner | None] = [None, None, None]
         self.line: dict[str, list[int]] = {"away": [], "home": []}
+        self.alignment = "normal"  # the fielding team's alignment for the current PA
 
     # -- helpers -------------------------------------------------------------
     def _log(self, kind: str, **data) -> None:
@@ -258,6 +261,13 @@ class GameSim:
             0.0, (defense.pitches - 0.8 * pitcher.pitch_limit) / (0.5 * pitcher.pitch_limit)
         )
         fatigue += 0.12 * max(0, times_through - 1)
+        self.alignment = choose(
+            defense.card.alignment_rules,
+            self.inning,
+            self.outs,
+            self.bases,
+            defense.runs - offense.runs,
+        )
         probs = pa_probabilities(
             hitter.rates_vs(pitcher.throws),
             pitcher.rates_vs(side),
@@ -267,7 +277,7 @@ class GameSim:
             self.park,
             defense.card.defense,
             min(fatigue, 1.0),
-            defense.card.alignment,
+            self.alignment,
         )
         result = self.rng.choices(list(probs), weights=list(probs.values()))[0]
         kind = result.split(":")[0] if ":" in result else result
@@ -284,7 +294,7 @@ class GameSim:
         bip = kind if ":" in result else None
         drng = self.detail_rng
         balls, strikes, strikes_thrown = detail.count(drng, "BIP" if bip else kind, pitches)
-        extra = {}
+        extra = {"alignment": self.alignment} if self.alignment != "normal" else {}
         if outcome == "K":
             extra["k_type"] = detail.strikeout_kind(drng)
         elif outcome == "HR":
@@ -419,8 +429,9 @@ class GameSim:
 
     def _ground_out(self, batter: Runner, scored: list) -> str:
         rng, b = self.rng, self.bases
+        play = GROUND_BALL_PLAY.get(self.alignment, {})
         if b[0] and self.outs < 2:
-            dp = 0.42 - 0.06 * batter.hitter.speed
+            dp = (0.42 - 0.06 * batter.hitter.speed) * play.get("double_play", 1.0)
             if rng.random() < dp:
                 self.outs += 2
                 b[0] = None
@@ -432,7 +443,7 @@ class GameSim:
             if rng.random() < 0.35:  # fielder's choice: lead runner out at second
                 self.outs += 1
                 if self.outs < 3:
-                    if b[2] and rng.random() < 0.5:
+                    if b[2] and rng.random() < min(0.5 * play.get("score_from_third", 1.0), 0.95):
                         self._score(b[2], scored)
                         b[2] = None
                     if b[1] and b[2] is None:
@@ -441,7 +452,10 @@ class GameSim:
                 return "FC"
         self.outs += 1
         if self.outs < 3:
-            if b[2] and rng.random() < 0.48 + 0.06 * b[2].hitter.speed:
+            home = (
+                (0.48 + 0.06 * b[2].hitter.speed) * play.get("score_from_third", 1.0) if b[2] else 0
+            )
+            if b[2] and rng.random() < min(home, 0.95):
                 self._score(b[2], scored)
                 b[2] = None
             if b[1] and b[2] is None and rng.random() < 0.55:

@@ -183,3 +183,48 @@ def test_switch_hitter_bats_opposite_the_pitcher():
 def test_format_box_renders():
     text = format_box(box_score(simulate_game(AWAY, HOME, DEFAULT_ENV, 1), "Away", "Home"))
     assert "Away Batters" in text and "Home Pitchers" in text
+
+
+def test_alignment_rules_pick_the_first_that_fits():
+    from npl_sim.engine.alignment import AlignmentRule, choose
+
+    on_third, on_first, empty = [None, None, "r"], ["r", None, None], [None, None, None]
+    rules = (AlignmentRule("infield_in", from_inning=7, max_lead=1), AlignmentRule("double_play"))
+    assert choose((), 9, 0, on_third, 0) == "normal"  # nothing ticked: straight up
+    assert choose(rules, 8, 1, on_third, 1) == "infield_in"
+    assert choose(rules, 6, 1, on_third, 1) == "normal"  # too early for infield in
+    assert choose(rules, 8, 1, on_third, 3) == "normal"  # lead too big
+    assert choose(rules, 8, 2, on_third, 0) == "normal"  # two outs
+    assert choose(rules, 3, 0, on_first, 0) == "double_play"
+    assert choose(rules, 3, 0, empty, 0) == "normal"
+    with pytest.raises(ValueError):
+        AlignmentRule("shift")
+
+
+def test_infield_in_holds_the_runner_on_third():
+    from npl_sim.engine.alignment import AlignmentRule
+
+    def scored_on_grounders(rules):
+        home = replace(HOME, alignment_rules=rules)
+        chances = scored = 0
+        for seed in range(400):
+            for e in simulate_game(AWAY, home, DEFAULT_ENV, seed):
+                if (
+                    e["type"] == "pa"
+                    and e["half"] == "top"
+                    and e["result"] == "GO"
+                    and e["bases_before"][2]
+                    and e["outs_before"] < 2
+                ):
+                    chances += 1
+                    scored += bool(e["scored"])
+        return scored / chances
+
+    straight = scored_on_grounders(())
+    infield_in = scored_on_grounders((AlignmentRule("infield_in"),))
+    assert infield_in < straight - 0.15
+
+
+def test_no_rules_plays_straight_up():
+    events = simulate_game(AWAY, HOME, DEFAULT_ENV, 5)
+    assert not any("alignment" in e for e in events if e["type"] == "pa")
