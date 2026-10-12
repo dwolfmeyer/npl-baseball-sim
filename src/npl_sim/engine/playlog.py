@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 
 from npl_sim.engine.box import dp_positions
 from npl_sim.engine.detail import POSITION_TITLE
+from npl_sim.engine.leverage import index as leverage_index
 from npl_sim.engine.names import BASE_NAME, NEXT_BASE, Roster, ordinal
+from npl_sim.engine.winprob import win_expectancy
 
 BALL_TYPE = {"GB": "ground ball", "LD": "line drive", "FB": "fly ball", "PU": "pop up"}
 FIELD_NAME = {
@@ -34,6 +36,9 @@ class Play:
     outs: int = 0  # outs after the play
     runs: int = 0
     score: dict[str, int] = field(default_factory=dict)  # by team abbreviation, after the play
+    home_we: float | None = None  # home team's win expectancy after the play
+    wpa: float | None = None  # win probability the batting team gained on the play
+    li: float | None = None  # leverage index before a plate appearance
 
     @property
     def scoring(self) -> bool:
@@ -72,6 +77,11 @@ class GameLog:
     away: str
     home: str
     halves: list[HalfInning]
+    home_we_start: float = 0.5
+
+    def win_curve(self) -> list[tuple[HalfInning, Play]]:
+        """Plays that move win expectancy (plate appearances and steals), in order."""
+        return [(h, p) for h in self.halves for p in h.plays if p.wpa is not None]
 
     def plays(self, filter: str = "all") -> list[tuple[HalfInning, list[Play]]]:
         """Half innings with their plays; filter is 'all' or 'scoring'."""
@@ -92,6 +102,15 @@ def game_log(events: list[dict]) -> GameLog:
     current = {s: roster.teams[s].starter for s in ("away", "home")}
     halves: list[HalfInning] = []
     full = roster.full
+    # Extra innings start with a runner on second unless the league turned it off.
+    extras = [e for e in events if e.get("inning", 0) > 9 and e["type"] == "pa"]
+    auto = not extras or any(e["type"] == "auto_runner" for e in events)
+
+    def we(e: dict, bases: list, outs: int) -> float:
+        lead = score["home"] - score["away"]
+        return win_expectancy(e["inning"], e["half"], lead, bases, outs, auto)
+
+    home_we = we_start = win_expectancy(1, "top", 0, [None] * 3, 0, auto)
 
     for e in events:
         if e["type"] in ("game_start", "final"):
@@ -107,6 +126,8 @@ def game_log(events: list[dict]) -> GameLog:
 
         play: Play | None = None
         if e["type"] == "pa":
+            lead = score["home"] - score["away"]
+            li = leverage_index(e["inning"], e["half"], lead, e["bases_before"], e["outs_before"])
             runs = len(e["scored"])
             score[offense] += runs
             half.runs += runs
@@ -120,6 +141,7 @@ def game_log(events: list[dict]) -> GameLog:
                 count=f"{e['count'][0]}-{e['count'][1]}",
                 outs=e["outs_before"] + e["outs"],
                 runs=runs,
+                li=li,
             )
         elif e["type"] == "stolen_base":
             play = Play(f"{full[e['runner']]} steals 2nd base.", e["type"], outs=e["outs_after"])
@@ -169,11 +191,16 @@ def game_log(events: list[dict]) -> GameLog:
             play = Play(f"Runner placed on 2nd: {full[e['runner']]}.", e["type"])
         elif e["type"] == "half_end":
             half.left_on_base = e["left_on_base"]
+        if play is not None and e["type"] in ("pa", "stolen_base", "caught_stealing"):
+            after = we(e, e["bases_after"], play.outs)
+            play.home_we = after
+            play.wpa = (after - home_we) * (1 if offense == "home" else -1)
+            home_we = after
         if play is not None:
             play.score = {abbr["away"]: score["away"], abbr["home"]: score["home"]}
             half.plays.append(play)
 
-    return GameLog(roster.teams["away"].name, roster.teams["home"].name, halves)
+    return GameLog(roster.teams["away"].name, roster.teams["home"].name, halves, we_start)
 
 
 def _describe_pa(e: dict, full: dict[str, str], fielder) -> str:
