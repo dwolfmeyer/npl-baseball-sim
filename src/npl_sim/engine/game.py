@@ -15,6 +15,7 @@ from npl_sim.engine import bullpen as pen
 from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
+from npl_sim.engine.manager import PinchHitting, run_value
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
 
 # Mean pitches per PA by outcome.
@@ -109,6 +110,9 @@ class TeamCard:
     hook: StarterHook = field(default_factory=StarterHook)
     # Outs each pitcher may still get this week (workload.py); none = no cap.
     outs_limit: dict[str, int] = field(default_factory=dict)
+    # Bench bats available to pinch-hit, and the owner's rules for it (manager.py).
+    bench: tuple[Hitter, ...] = ()
+    pinch: PinchHitting = field(default_factory=PinchHitting)
 
     @property
     def short(self) -> str:
@@ -136,6 +140,7 @@ class _Side:
     lineup: list[tuple[Hitter, str]] = field(default_factory=list)  # this game's, after subs
     subs_used: set[int] = field(default_factory=set)
     removed: set[str] = field(default_factory=set)  # players who left the game
+    pinch_hitters: int = 0
     charged: dict[str, int] = field(default_factory=dict)  # runs charged per pitcher
     defense: Defense = field(default_factory=Defense)  # the card's, for who plays where now
 
@@ -280,8 +285,10 @@ class GameSim:
                 "pitchers": [{"id": p.id, "name": p.name, "throws": p.throws} for p in pitchers],
                 "starter": card.starter.id,
                 "bench": [
-                    {"id": s.player.id, "name": s.player.name, "bats": s.player.bats}
-                    for s in card.defensive_subs
+                    {"id": h.id, "name": h.name, "bats": h.bats}
+                    for h in {
+                        h.id: h for h in [s.player for s in card.defensive_subs] + list(card.bench)
+                    }.values()
                 ],
             }
 
@@ -335,6 +342,7 @@ class GameSim:
             self._maybe_steal()
             if self.outs >= 3:
                 break
+            self._maybe_pinch_hit()
             self._plate_appearance()
             if self.outs < 3:
                 self._maybe_change_pitcher(mid_inning=True)
@@ -379,6 +387,88 @@ class GameSim:
                 moved=moved,
             )
 
+    def _maybe_pinch_hit(self) -> None:
+        """Send up a bench bat for the batter due up when the owner's rules
+        allow it and one is expected to do clearly better here."""
+        offense, defense = self._batting(), self._fielding()
+        rule = offense.card.pinch
+        if not rule.enabled or not offense.card.bench or self.inning < rule.from_inning:
+            return
+        if offense.pinch_hitters >= rule.max_per_game:
+            return
+        hitter, pos = offense.lineup[offense.slot]
+        if hitter.id in rule.never_for:
+            return
+        li = self._leverage(defense, mid_inning=True)
+        if li < rule.min_leverage:
+            return
+        in_game = {h.id for h, _ in offense.lineup}
+        bench = [
+            h for h in offense.card.bench if h.id not in in_game and h.id not in offense.removed
+        ]
+        pitcher = defense.pitcher
+
+        def edge(h: Hitter) -> bool:
+            return h.side_vs(pitcher.throws) != pitcher.throws
+
+        def catches(h: Hitter) -> bool:
+            return "C" in h.positions
+
+        def ok(h: Hitter) -> bool:
+            if rule.platoon_only and (edge(hitter) or not edge(h)):
+                return False
+            if not rule.out_of_position and fielding.out_of_position(h.positions, pos):
+                return False
+            # Never leave the team without a catcher.
+            return pos != "C" or catches(h) or any(catches(o) for o in bench if o is not h)
+
+        candidates = [h for h in bench if ok(h)]
+        if not candidates:
+            return
+        now = self._expected_runs(hitter, pitcher, defense)
+        best, value = max(
+            ((h, self._expected_runs(h, pitcher, defense)) for h in candidates),
+            key=lambda hv: hv[1],
+        )
+        if value - now < rule.min_gain:
+            return
+        slot = offense.slot
+        offense.lineup[slot] = (best, pos)
+        offense.removed.add(hitter.id)
+        offense.pinch_hitters += 1
+        offense.set_defense()
+        self._log(
+            "pinch_hitter",
+            team=offense.card.name,
+            into=best.id,
+            out=hitter.id,
+            slot=slot,
+            position=pos,
+            leverage=round(li, 2),
+            gain=round(value - now, 4),
+            outs=self.outs,
+        )
+
+    def _fatigue(self, defense: _Side) -> float:
+        p = defense.pitcher
+        fatigue = max(0.0, (defense.pitches - 0.8 * p.pitch_limit) / (0.5 * p.pitch_limit))
+        fatigue += 0.12 * max(0, defense.batters_faced // 9 - 1)
+        return min(fatigue, 1.0)
+
+    def _expected_runs(self, hitter: Hitter, pitcher: Pitcher, defense: _Side) -> float:
+        side = hitter.side_vs(pitcher.throws)
+        probs = pa_probabilities(
+            hitter.rates_vs(pitcher.throws),
+            pitcher.rates_vs(side),
+            self.env,
+            side,
+            pitcher.throws,
+            self.park,
+            defense.defense,
+            self._fatigue(defense),
+        )
+        return run_value(probs)
+
     def _walkoff(self) -> bool:
         return (
             self.half == "bottom"
@@ -419,11 +509,6 @@ class GameSim:
         pitcher = defense.pitcher
         side = hitter.side_vs(pitcher.throws)
 
-        times_through = defense.batters_faced // 9
-        fatigue = max(
-            0.0, (defense.pitches - 0.8 * pitcher.pitch_limit) / (0.5 * pitcher.pitch_limit)
-        )
-        fatigue += 0.12 * max(0, times_through - 1)
         self.alignment = choose(
             defense.card.alignment_rules,
             self.inning,
@@ -439,7 +524,7 @@ class GameSim:
             pitcher.throws,
             self.park,
             defense.defense,
-            min(fatigue, 1.0),
+            self._fatigue(defense),
             self.alignment,
         )
         result = self.rng.choices(list(probs), weights=list(probs.values()))[0]

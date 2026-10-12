@@ -116,6 +116,17 @@ divergence on the PA result mix, Wasserstein distance on runs per game).
 After an intended engine change, run `npl-sim calibrate --save-baseline`
 and commit the new baseline with it.
 
+Pinch hitting and manager styles (`engine/manager.py`): before each PA the
+batting team may send up a bench bat when the owner's `PinchHitting` rules
+allow it (from an inning, at or above a leverage index, for the platoon edge
+only or any edge, a minimum gain in expected runs per PA, a per-game limit,
+never out of position unless allowed, never leaving the team without a
+catcher). The comparison uses the same PA model that plays the game, so the
+talent blend and splits decide it. Five manager styles (sabermetric,
+aggressive, balanced, old-school, passive) bundle a starter hook with
+pinch-hitting rules; owners can change any setting. In test weeks the
+default (balanced) pinch-hits about 0.4 times per team-game.
+
 Weekly talent blend (`npl_sim/talent/`, Milestone 7): each player's ability
 for a sim week, built from Statcast pitches in three layers, each an index
 against the league for the same handedness matchup. Baseline weights this

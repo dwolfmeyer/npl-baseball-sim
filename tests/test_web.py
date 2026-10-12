@@ -144,7 +144,8 @@ def test_opener_and_piggyback_plan():
 
 @pytest.fixture
 def client(tmp_path):
-    c = TestClient(create_app(store=Store(tmp_path), players=PLAYERS, elig=ELIG))
+    clean = tmp_path / "clean"
+    c = TestClient(create_app(store=Store(tmp_path), players=PLAYERS, elig=ELIG, clean_root=clean))
     c.app_store_root = tmp_path
     return c
 

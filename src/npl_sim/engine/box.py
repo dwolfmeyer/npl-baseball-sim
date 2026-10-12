@@ -279,12 +279,13 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
                 pit(defense, e["pitcher"]).outs += 1
                 stints[defense][-1].outs += 1
                 notes[offense]["CS"].append((line.name, f"{base} by {battery}"))
-        elif e["type"] == "defensive_sub":
+        elif e["type"] in ("defensive_sub", "pinch_hitter"):
             side = roster.side_of(e["team"])
             roster.teams[side].substitute(e)
-            batting[side][e["into"]] = BattingLine(
-                roster.short[e["into"]], e["position"], substitute=True
-            )
+            pos = e["position"]
+            if e["type"] == "pinch_hitter":
+                pos = "PH" if pos == "DH" else f"PH-{pos}"
+            batting[side][e["into"]] = BattingLine(roster.short[e["into"]], pos, substitute=True)
             slots[side][e["slot"]].append(e["into"])
             if e.get("moved"):
                 batting[side][e["moved"]["player"]].position += "-" + e["moved"]["position"]
