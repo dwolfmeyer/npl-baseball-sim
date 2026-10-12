@@ -39,6 +39,18 @@ npl-sim import-rosters --season 2026 --week 1 --week-start 2026-03-23 \
 
 The command fails if any MLB Roster player has no MLBAM ID.
 
+Until the NPL app's login is issued, every team's roster comes from the
+league's roster workbook (one tab per team), read the way the NPL app reads
+it: section headers set the tier, column A's 1 marks the 40-man. The
+result is saved as an NPL app dump in `data/rosters/npl-2026.json`, which
+`sim-season` reads (and the web app and `sim-week` can, with
+`NPL_ROSTER_DUMP=data/rosters/npl-2026.json`). The command also lists
+teams whose tab header names a different division than `config/league.yaml`.
+
+```sh
+npl-sim rosters-from-workbook National_Pastime_League_Rosters.xlsx
+```
+
 ### Schedule
 
 ```sh
@@ -47,10 +59,36 @@ npl-sim generate-schedule --season 2026 --csv schedule-2026.csv --save
 
 Builds MLB's balanced 162-game mix from the league config (rival 18,
 division 17, own league 8, interleague 4 as home-and-home 2-game sets and 3
-vs two rotating opponents), gives every team 81 home games, packs the series
-into the Monday-Sunday weeks in `config/calendar.yaml` with OR-Tools CP-SAT,
-and validates the result before saving. Division rivals default to the first
-two and last two teams listed; set `rivals` on a division to change them.
+vs two rotating opponents), gives every team 81 home games, all in 2- and
+3-game series, packs the series into the Monday-Sunday weeks in
+`config/calendar.yaml` with OR-Tools CP-SAT, and validates the result
+before saving. Division rivals default to the first two and last two teams
+listed; set `rivals` on a division to change them.
+
+Weeks look like MLB's: a 6-game week is a midweek and a weekend series with
+an off day (Monday or Thursday), a 7-game week is three series with none,
+and 7-game weeks never come back to back. A 2-game series in a 3-day slot
+leaves a travel day. In 2026 each team gets 20 off days plus the All-Star
+break, at most 16 straight game days (MLB's limit is 20), 5 to 7 games in
+every full week, and no homestand or road trip over 4 series, so a
+five-man rotation on four days' rest covers every week.
+
+### Season sim
+
+```sh
+npl-sim sim-season --season 2026 --csv season-games.csv
+```
+
+Plays the whole schedule week by week through `sim_week` between every
+team's default lineup card (rotation: the five arms with the most MLB
+starts; closer: most saves plus holds), carrying unused starts, the
+rotation turn and rest into the next week, then prints standings by
+division and league sanity stats: runs per game, K%, BB%, HR rate, steals,
+extra innings, bullpen games and the shortest rest between starts. Playing
+time is each player's typical week at his season pace from the eligibility
+data, or a full-time week (about 26 PA, 6.2 starts per five-man rotation,
+3 relief innings) where it has none yet. Ability is league average until
+the weekly talent blend is wired in.
 
 ### Game engine
 

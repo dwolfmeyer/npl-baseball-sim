@@ -1,6 +1,12 @@
 # NPL league alignment. Divisions are realigned every two offseasons:
 # add a new alignment block (or edit this one) rather than changing code.
 # `from_season` is the first season this alignment applies to.
+#
+# 2026 follows the division headers on the league's roster workbook tabs
+# (Dave, 2026-10-12). Rats (tab "Rats #8", new regime in 2026) took the
+# slot the project spec listed as Absolute Sickos. Within each division the
+# teams are in workbook tab order, so rivals default to the first two and
+# the last two; set `rivals` on a division to change that.
 alignments:
   - from_season: 2026
     leagues:
@@ -8,17 +14,17 @@ alignments:
         dh: true
         divisions:
           - name: Oil Can
-            teams: [Milwaukee DockHounds, Hill Valley McFlys, Chicago Orphans, New York Valkyries]
+            teams: [Asbury Park Bosses, Los Angeles Bulldog, Central City Speedsters, Brooklyn TOOTBLANs]
           - name: Splendid Splinter
-            teams: [Asbury Park Bosses, Los Angeles Bulldog, Midwest Ducksnorts, Chicago Kodiaks]
+            teams: [Nuremberg GmbH, Lion King, Chicago Kodiaks, Dallas Perwar]
           - name: Sultan of Swat
-            teams: [London Calling, Bad Guys, Lion King, Dallas Perwar]
+            teams: [Cheesequake Cheddar, Midwest Ducksnorts, Chicago Orphans, Winterfell Starks]
       - name: NL
         dh: true
         divisions:
           - name: Big Train
-            teams: [Denver Bears, Cheesequake Cheddar, Quebec Quails, Durham Tobacconists]
+            teams: [Milwaukee DockHounds, Quebec Quails, Frozen Ropes, Durham Tobacconists]
           - name: Say Hey Kid
-            teams: [Honolulu Hitmen, Frozen Ropes, Winterfell Starks, Old Sturbridge Villagers]
+            teams: [London Calling, Honolulu Hitmen, Hill Valley McFlys, Old Sturbridge Villagers]
           - name: Stan The Man
-            teams: [Nuremberg GmbH, Absolute Sickos, Central City Speedsters, Brooklyn TOOTBLANs]
+            teams: [Denver Bears, Bad Guys, Rats, New York Valkyries]
