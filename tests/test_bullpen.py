@@ -16,7 +16,10 @@ def test_leverage_is_high_late_and_close():
     blowout = leverage(9, "top", 8, EMPTY, 0)
     assert save_spot > 1.8 > early_tie > blowout
     assert leverage(7, "top", 0, LOADED, 1) > leverage(7, "top", 0, EMPTY, 1)
-    assert leverage(9, "bottom", 0, EMPTY, 0) > leverage(9, "top", 0, EMPTY, 0)
+    # Straight from Tango's table, from the fielding team's side.
+    assert leverage(9, "top", 1, EMPTY, 0) == 2.9  # home up 1, top of the 9th
+    assert leverage(9, "bottom", 1, LOADED, 2) == 10.9  # visitors up 1, bases loaded
+    assert leverage(1, "top", 0, EMPTY, 0) == 0.9
 
 
 def test_situation_tiers():

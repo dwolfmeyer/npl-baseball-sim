@@ -70,10 +70,18 @@ each optionally limited by inning and score.
 Bullpen (`engine/bullpen.py`): owners tag relievers high, medium or low
 leverage, mop-up, long or any, start-of-inning only, a same-side matchup
 specialist, and a stint length. No closer is required. When a pitcher comes
-out the engine estimates leverage from inning, score and base-out state and
-picks from the matching tier, preferring the platoon edge on the next batter,
+out the engine reads the spot's leverage from Tango's Leverage Index table
+(`engine/leverage.py`: inning, half, score, outs, runners) and picks from the
+matching tier, preferring the platoon edge on the next batter,
 then the owner's order. Openers' starters and piggybacks (`TeamCard.follow`)
 enter first, in order. Untagged pens enter in listed order.
+
+Starter hooks (`engine/hooks.py`, `TeamCard.hook`): besides his pitch limit,
+a starter (or the bulk arm after an opener) comes out after a set number of
+times through the order, once he has been charged with a set number of runs,
+or from a set inning on when the spot's leverage index reaches a threshold.
+Defaults when the owner sets nothing: out after 6 runs, and from the 7th in
+spots of LI 2.0 or more. Each pitching change logs its reason.
 
 Position eligibility (`npl_sim/eligibility.py`): 20 MLB games at a position
 last season or 10 this season, counted from box scores; players with no

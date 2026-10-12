@@ -2,9 +2,8 @@
 
 Milestone 5 scope: full PA model, baserunning, steals, double plays, sac
 flies, errors, extra innings with the automatic runner, walk-offs, and a
-simple pitch-count hook with relievers in listed order. The owner's full
-lineup card (leverage bullpen, hooks, pinch hitters, defensive subs) is
-Milestone 6.
+starter hooks by pitch count, times through the order, runs allowed and
+leverage (hooks.py), and relievers by the owner's bullpen designations.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from dataclasses import dataclass, field
 from npl_sim.engine import bullpen as pen
 from npl_sim.engine import detail
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
+from npl_sim.engine.hooks import StarterHook
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
 
 # Mean pitches per PA by outcome.
@@ -98,6 +98,9 @@ class TeamCard:
     # Bullpen arms who follow in fixed order before anyone is picked by
     # leverage: the starter after an opener, a piggyback.
     follow: tuple[str, ...] = ()
+    # When the starter (and the bulk arm after an opener) comes out, besides
+    # his pitch limit: times through the order, runs allowed, leverage.
+    hook: StarterHook = field(default_factory=StarterHook)
 
     @property
     def short(self) -> str:
@@ -125,6 +128,7 @@ class _Side:
     lineup: list[tuple[Hitter, str]] = field(default_factory=list)  # this game's, after subs
     subs_used: set[int] = field(default_factory=set)
     removed: set[str] = field(default_factory=set)  # players who left the game
+    charged: dict[str, int] = field(default_factory=dict)  # runs charged per pitcher
 
 
 class GameSim:
@@ -159,13 +163,16 @@ class GameSim:
 
     def _score(self, runner: Runner, scored: list) -> None:
         self._batting().runs += 1
+        charged = self._fielding().charged
+        charged[runner.pitcher_id] = charged.get(runner.pitcher_id, 0) + 1
         scored.append(
             {"runner": runner.hitter.id, "pitcher": runner.pitcher_id, "earned": runner.earned}
         )
 
     def _maybe_change_pitcher(self, mid_inning: bool) -> None:
         side = self._fielding()
-        if not self._should_pull(side, mid_inning):
+        reason = self._should_pull(side, mid_inning)
+        if reason is None:
             return
         new, detail_ = self._next_pitcher(side, mid_inning)
         if new is None:
@@ -185,19 +192,33 @@ class GameSim:
             into=side.pitcher.id,
             outs=self.outs if mid_inning else 0,
             on_base=on_base,
-            **detail_,
+            reason=reason,
+            **{"leverage": self._leverage(side, mid_inning), **detail_},
         )
 
-    def _should_pull(self, side: _Side, mid_inning: bool) -> bool:
-        p = side.pitcher
+    def _leverage(self, side: _Side, mid_inning: bool) -> float:
+        """Leverage of the coming PA for the fielding `side`."""
+        lead = side.runs - self._batting().runs
+        bases, outs = (self.bases, self.outs) if mid_inning else ([None] * 3, 0)
+        return pen.leverage(self.inning, self.half, lead, bases, outs)
+
+    def _should_pull(self, side: _Side, mid_inning: bool) -> str | None:
+        """Why the current pitcher comes out before the next PA, or None."""
+        p, card = side.pitcher, side.card
         if side.pitches >= p.pitch_limit + (15 if mid_inning else 0):
-            return True
-        plan = side.card.relief.get(p.id)
-        is_reliever = p.id != side.card.starter.id and p.id not in side.card.follow
-        if mid_inning or plan is None or not is_reliever:
-            return False
+            return "pitch_count"
+        if p.id == card.starter.id or p.id in card.follow:
+            return card.hook.reason(
+                side.batters_faced,
+                side.charged.get(p.id, 0),
+                self.inning,
+                self._leverage(side, mid_inning) if card.hook.leverage is not None else None,
+            )
+        plan = card.relief.get(p.id)
+        if mid_inning or plan is None:
+            return None
         # Between innings: would he run past his stint if he went out again?
-        return side.pitcher_outs + 3 > plan.outs + 1
+        return "stint" if side.pitcher_outs + 3 > plan.outs + 1 else None
 
     def _next_pitcher(self, side: _Side, mid_inning: bool):
         card = side.card
@@ -214,8 +235,7 @@ class GameSim:
         offense = self._batting()
         batter = offense.lineup[offense.slot][0] if offense.lineup else None
         lead = side.runs - offense.runs
-        bases, outs = (self.bases, self.outs) if mid_inning else ([None] * 3, 0)
-        li = pen.leverage(self.inning, self.half, lead, bases, outs)
+        li = self._leverage(side, mid_inning)
         starter_out = side.pitcher.id == card.starter.id or side.pitcher.id in card.follow
         tier = pen.situation(self.inning, lead, li, starter_out)
         pick = pen.choose(available, card.relief, tier, mid_inning, batter)
