@@ -32,7 +32,7 @@ class Team:
         self.positions = {p["position"]: p["id"] for p in self.lineup}
 
     def substitute(self, e: dict) -> None:
-        """Apply a `defensive_sub` event to who plays where."""
+        """Apply a `defensive_sub` or `pinch_hitter` event to who plays where."""
         if e.get("moved"):
             self.positions[e["moved"]["position"]] = e["moved"]["player"]
         self.positions[e["position"]] = e["into"]

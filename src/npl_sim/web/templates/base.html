@@ -31,11 +31,15 @@ tr.inactive td{color:var(--muted)}
 .banner{background:var(--score);border-radius:6px;padding:8px 12px;margin-bottom:16px}
 .form-row{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:12px}
 .order-list{list-style:none;margin:0;padding:0}
-.slot{display:grid;grid-template-columns:20px 18px minmax(0,1fr) 64px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);background:var(--bg)}
+.slot{display:grid;grid-template-columns:20px 18px minmax(0,1fr) 64px auto auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);background:var(--bg)}
 .slot .num{color:var(--muted);font-variant-numeric:tabular-nums}
 .slot select{width:100%}
 .grip{cursor:grab;color:var(--muted);text-align:center;touch-action:none;user-select:none;font-size:16px}
 .moves{display:inline-flex;gap:2px}
+.slot .line{font-variant-numeric:tabular-nums;font-size:13px;white-space:nowrap}
+.stats td,.stats th{white-space:nowrap;text-align:left}
+@media (max-width:560px){.slot .line{display:none}.slot{grid-template-columns:20px 18px minmax(0,1fr) 64px auto}}
+.stats .g{text-align:center;font-variant-numeric:tabular-nums}
 .mv{background:none;border:1px solid var(--line);border-radius:4px;color:var(--muted);font-size:10px;padding:2px 5px;cursor:pointer}
 .mv:hover,.mv:focus-visible{color:var(--fg)}
 .slot.dragging,tr.dragging{opacity:.4}tr.over td,tbody.over td{background:color-mix(in srgb,var(--accent) 14%,transparent)}.pen th{text-align:left;font-size:12px;color:var(--muted);padding-top:8px}.nowrap{white-space:nowrap}.slot.over{outline:2px solid var(--accent);outline-offset:-2px}
@@ -45,6 +49,10 @@ tr.inactive td{color:var(--muted)}
 .ghost{position:fixed;pointer-events:none;z-index:10;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.2);max-width:90vw}
 .rotation td,.rotation th{text-align:left}.rotation select{max-width:190px}
 label.check{display:flex;gap:8px;align-items:flex-start;margin:6px 0}
+label.field{display:inline-flex;flex-direction:column;gap:2px;margin:4px 14px 6px 0;font-size:13px;color:var(--muted)}
+label.field select{color:var(--fg);max-width:100%}label.field{max-width:100%}label.field.wide{display:flex}
+fieldset.pinch{border:0;padding:0;margin:0;min-width:0}fieldset.pinch.off{opacity:.45}
+.never{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0 12px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .head-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .head-row h2{margin:0}.small-btn{padding:4px 10px;font-size:12px}

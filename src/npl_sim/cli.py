@@ -1,7 +1,7 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`, `demo-game`, `demo-week`, `sim-week`, `sim-season`, `web`, `eligibility`,
-`rosters-from-workbook`, and the
-MLB data pipeline (`pull-week`, `backfill`, `check-calendar`, `sync-mlb`)."""
+`generate-schedule`, `demo-game`, `demo-week`, `sim-week`, `sim-season`, `calibrate`, `web`,
+`eligibility`, `rosters-from-workbook`, and the MLB data pipeline (`pull-week`, `backfill`,
+`check-calendar`, `sync-mlb`)."""
 
 from __future__ import annotations
 
@@ -74,6 +74,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     demo_week.add_argument("--seed", type=int, default=1)
 
+    cal = sub.add_parser(
+        "calibrate",
+        help="calibration harness: identities, run environment, archetypes, drift from baseline",
+    )
+    cal.add_argument("--games", type=int, default=1000)
+    cal.add_argument("--seed", type=int, default=0)
+    cal.add_argument(
+        "--targets", default="placeholder", help="target set in config/calibration.yaml"
+    )
+    cal.add_argument(
+        "--save-baseline",
+        action="store_true",
+        help="save these results as the engine baseline (after an intended engine change)",
+    )
+
     simw = sub.add_parser(
         "sim-week",
         help="sim a week between the test teams' saved lineup cards under the playing-time budget",
@@ -81,7 +96,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     simw.add_argument("--seed", type=int, default=1)
     simw.add_argument("--teams", nargs="*", help="team names (default: every team with a roster)")
     simw.add_argument("--season", type=int, default=2026)
-    simw.add_argument("--week", type=int, help="use this MLB week's real usage (needs clean data)")
+    simw.add_argument(
+        "--week",
+        type=int,
+        help="use this MLB week's real usage and the talent blend (needs clean data)",
+    )
     simw.add_argument("--clean-root", type=Path, default=Path("data/clean"))
     simw.add_argument("--out", type=Path, help="write index.html and a page per game here")
     simw.add_argument("--save", action="store_true", help="also save the games to the web app")
@@ -231,6 +250,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if m.unavailable:
                     notes.append("resting or used up: " + ", ".join(m.unavailable))
                 print(f"  {team}: " + "; ".join(notes))
+    elif args.cmd == "calibrate":
+        return _calibrate(args)
     elif args.cmd == "sim-week":
         return _sim_week(args)
     elif args.cmd == "sim-season":
@@ -263,6 +284,44 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def _calibrate(args: argparse.Namespace) -> int:
+    from npl_sim.calibration import harness as h
+
+    games = h.average_games(args.games, args.seed)
+    stats = h.summary(games)
+    print(f"{args.games} games between league-average teams (seed {args.seed})\n")
+    print("Run environment vs", args.targets)
+    checks = h.check_targets(stats, h.load_targets(args.targets))
+    for c in checks:
+        print(f"  {c.stat:<8} {c.value:7.3f}   [{c.lo:.3f}, {c.hi:.3f}]  {'ok' if c.ok else 'OFF'}")
+    bad = h.identities(games)
+    print(f"\nAccounting identities: {'all add up' if not bad else f'{len(bad)} broken'}")
+    for msg in bad[:10]:
+        print("  " + msg)
+    print("\nArchetypes (sim vs card, per PA)")
+    for kind, r in h.archetype_report().items():
+        sim, exp = r["sim"], r["expected"]
+        cells = "  ".join(f"{k} {sim[k]:.3f}/{exp[k]:.3f}" for k in ("K", "BB", "HR"))
+        print(f"  {kind:<20} {cells}  TTO {sim['tto']:.3f}")
+    sd50, bin50 = h.k_spread(games, 50)
+    sd200, bin200 = h.k_spread(games, 200)
+    print(
+        f"\nK% spread: 50 PA {sd50:.3f} (binomial {bin50:.3f}), 200 PA {sd200:.3f} ({bin200:.3f})"
+    )
+    fp = h.fingerprint(games)
+    if args.save_baseline:
+        print(f"\nSaved baseline to {h.save_baseline(fp)}")
+        return 0
+    if h.BASELINE.exists():
+        d = h.drift(h.load_baseline(), fp)
+        flags = {k: "ok" if d[k] <= h.DRIFT_LIMITS[k] else "SHIFTED" for k in d}
+        print(
+            f"\nDrift from baseline: event mix JSD {d['jsd']:.5f} ({flags['jsd']}), "
+            f"runs/game Wasserstein {d['wasserstein']:.3f} ({flags['wasserstein']})"
+        )
+    return 0 if not bad and all(c.ok for c in checks) else 1
+
+
 def _sim_week(args: argparse.Namespace) -> int:
     from npl_sim.engine.box import box_score
     from npl_sim.playing_time import load_mlb_week
@@ -289,14 +348,21 @@ def _sim_week(args: argparse.Namespace) -> int:
         saved = store.load_card(t)
         cards[t] = saved or lineup.default_card(rosters[t], elig)
         print(f"{t}: {'saved lineup card' if saved else 'default lineup card (none saved)'}")
-    mlb = None
+    mlb = talent = None
     usage = f"a typical week at each player's {args.season} pace (full time if no data)"
+    ability = "league average (no --week)"
     if args.week is not None:
+        from npl_sim.talent.load import load_week_talent
+
         mlb = load_mlb_week(args.clean_root, args.season, args.week)
         usage = f"real MLB usage from {args.season} week {args.week}"
+        recs = {str(p.mlb_id): elig.players.get(p.mlb_id) for r in rosters.values() for p in r}
+        hands = {pid: rec.bats for pid, rec in recs.items() if rec and rec.bats}
+        talent = load_week_talent(args.clean_root, args.season, args.week, hands)
+        ability = f"the talent blend for {args.season} week {args.week}"
     schedule = round_robin(teams)
-    result = sim_week(cards, rosters, elig, schedule, mlb, args.seed)
-    print(f"Playing time: {usage}\n")
+    result = sim_week(cards, rosters, elig, schedule, mlb, args.seed, talent=talent)
+    print(f"Playing time: {usage}\nAbility: {ability}\n")
     for g in result.games:
         f = g["events"][-1]
         print(f"Day {g['day'] + 1}: {g['away']} {f['away']}, {g['home']} {f['home']}")
@@ -306,7 +372,7 @@ def _sim_week(args: argparse.Namespace) -> int:
     if args.out:
         title = f"NPL test week ({args.season}" + (f", week {args.week})" if args.week else ")")
         names = {str(p.mlb_id): p.name for r in rosters.values() for p in r}
-        subtitle = f"Playing time: {usage}. Seed {args.seed}."
+        subtitle = f"Playing time: {usage}. Ability: {ability}. Seed {args.seed}."
         index = write_week(result, args.out, title, subtitle, names)
         print(f"\nWrote {index}")
     if args.save:

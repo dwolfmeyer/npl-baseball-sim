@@ -26,7 +26,8 @@ OUT_VERB = {"FO": "flies out", "LO": "lines out", "PO": "pops out"}
 @dataclass
 class Play:
     description: str
-    kind: str  # pa, stolen_base, caught_stealing, pitching_change, defensive_sub, auto_runner
+    kind: str  # pa, stolen_base, caught_stealing, pitching_change, defensive_sub,
+    # pinch_hitter, auto_runner
     batter: str | None = None
     pitcher: str | None = None
     count: str | None = None  # "1-2" on the final pitch of a plate appearance
@@ -155,6 +156,15 @@ def game_log(events: list[dict]) -> GameLog:
                     )
             team.substitute(e)
             play = Play(desc, e["type"], outs=0)
+        elif e["type"] == "pinch_hitter":
+            side = roster.side_of(e["team"])
+            roster.teams[side].substitute(e)
+            play = Play(
+                f"Offensive Substitution: Pinch-hitter {full[e['into']]} replaces "
+                f"{full[e['out']]}.",
+                e["type"],
+                outs=e.get("outs", 0),
+            )
         elif e["type"] == "auto_runner":
             play = Play(f"Runner placed on 2nd: {full[e['runner']]}.", e["type"])
         elif e["type"] == "half_end":

@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 from npl_sim.engine.box import box_score
 from npl_sim.engine.defaults import DEFAULT_ENV
 from npl_sim.engine.game import simulate_game
+from npl_sim.engine.manager import STYLES
 from npl_sim.engine.playlog import game_log
 from npl_sim.league import load_league_file, team_slots
 from npl_sim.reporting import gameday
@@ -28,7 +29,7 @@ from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.rosters.sources import NPL_DATABASE_URL_ENV, players_from_database, players_from_dump
 from npl_sim.simweek import round_robin, sim_week
-from npl_sim.web import lineup
+from npl_sim.web import lineup, stats
 from npl_sim.web.store import Store, slug
 
 ROSTER_DUMP_ENV = "NPL_ROSTER_DUMP"
@@ -56,6 +57,11 @@ TEMPLATES.env.globals.update(
     defense_rules=lineup.DEFENSE_RULES,
     sub_rows=lineup.DEFENSIVE_SUB_ROWS,
     sub_innings=lineup.SUB_INNINGS,
+    styles=STYLES,
+    pinch_innings=lineup.PINCH_INNINGS,
+    pinch_leverage=lineup.PINCH_LEVERAGE,
+    pinch_gains=lineup.PINCH_GAINS,
+    pinch_max=lineup.PINCH_MAX,
 )
 
 
@@ -73,6 +79,7 @@ def create_app(
     store: Store | None = None,
     players: list[NplPlayer] | None = None,
     elig: Eligibility | None = None,
+    clean_root: Path | str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="NPL Sim")
     store = store or Store()
@@ -84,6 +91,15 @@ def create_app(
         if p.team in rosters and p.is_active_mlb and p.mlb_id is not None:
             rosters[p.team].append(p)
     by_slug = {slug(t): t for t in rosters}
+    clean_root = clean_root or os.environ.get(stats.CLEAN_ROOT_ENV) or stats.DEFAULT_CLEAN_ROOT
+    splits = stats.SplitsCache(clean_root, SEASON)
+    talents = stats.TalentCache(clean_root, SEASON)
+    hands = {
+        str(p.mlb_id): rec.bats
+        for r in rosters.values()
+        for p in r
+        if (rec := elig.players.get(p.mlb_id)) and rec.bats
+    }
 
     def team_for(team_slug: str) -> str:
         if team_slug not in by_slug or not rosters[by_slug[team_slug]]:
@@ -102,6 +118,8 @@ def create_app(
         hitters = [p for p in roster if not lineup.is_pitcher(p)]
         arms = [p for p in roster if lineup.is_pitcher(p)]
         fields = {}
+        lines = splits.get()
+        talent = talents.get(hands)
         for h in hitters:
             positions, from_games = lineup.fielding(h, elig)
             fields[h.mlb_id] = {
@@ -114,6 +132,8 @@ def create_app(
                 },
                 "from_games": from_games,
                 "games": elig.games_text(h.mlb_id),
+                "lines": {side: lines.line(h.mlb_id, side) for side in lineup.SIDES},
+                "grades": stats.grades(lineup.glove_positions(h, elig), h.mlb_id, talent),
             }
         return TEMPLATES.TemplateResponse(
             request,
@@ -129,6 +149,7 @@ def create_app(
                 "arms": arms,
                 "names": {a.mlb_id: a.name for a in arms},
                 "fields": fields,
+                "stats_source": lines.source,
                 "active": set(card.active),
                 "rotation": [pid for pid in card.rotation if pid is not None],
             },
@@ -257,7 +278,15 @@ def create_app(
                 raise HTTPException(400, f"{team}'s lineup card has errors: {result.errors[0]}")
             cards[team] = card
         week_rosters = {t: rosters[t] for t in teams}
-        result = sim_week(cards, week_rosters, elig, round_robin(teams), None, seed)
+        talent = talents.get(hands)
+        ability = (
+            f"Ability: the talent blend for {SEASON} week {talents.week}."
+            if talent is not None
+            else f"Ability: league average (the talent blend didn't load: {talents.error})."
+            if talents.error
+            else "Ability: league average (no clean MLB data on this machine)."
+        )
+        result = sim_week(cards, week_rosters, elig, round_robin(teams), None, seed, talent=talent)
         game_ids = []
         for g in result.games:
             events = g["events"]
@@ -286,7 +315,7 @@ def create_app(
         page = render_week(
             result,
             "NPL test week",
-            f"Playing time: a typical week at each player's {SEASON} pace. Seed {seed}.",
+            f"Playing time: a typical week at each player's {SEASON} pace. {ability} Seed {seed}.",
             link=lambda i: f"/games/{game_ids[i]}",
             names=names,
         )
