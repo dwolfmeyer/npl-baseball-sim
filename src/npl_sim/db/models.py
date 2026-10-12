@@ -42,6 +42,9 @@ class RosterTier(enum.StrEnum):
     AAA = "aaa"
     AA = "aa"
     A = "a"
+    RESTRICTED = "restricted"
+    FOREIGN = "foreign"
+    RETIRED = "retired"
 
 
 class League(Base):
