@@ -75,7 +75,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     simw.add_argument("--seed", type=int, default=1)
     simw.add_argument("--teams", nargs="*", help="team names (default: every team with a roster)")
     simw.add_argument("--season", type=int, default=2026)
-    simw.add_argument("--week", type=int, help="use this MLB week's real usage (needs clean data)")
+    simw.add_argument(
+        "--week",
+        type=int,
+        help="use this MLB week's real usage and the talent blend (needs clean data)",
+    )
     simw.add_argument("--clean-root", type=Path, default=Path("data/clean"))
     simw.add_argument("--out", type=Path, help="write index.html and a page per game here")
     simw.add_argument("--save", action="store_true", help="also save the games to the web app")
@@ -252,14 +256,21 @@ def _sim_week(args: argparse.Namespace) -> int:
         saved = store.load_card(t)
         cards[t] = saved or lineup.default_card(rosters[t], elig)
         print(f"{t}: {'saved lineup card' if saved else 'default lineup card (none saved)'}")
-    mlb = None
+    mlb = talent = None
     usage = f"a typical week at each player's {args.season} pace (full time if no data)"
+    ability = "league average (no --week)"
     if args.week is not None:
+        from npl_sim.talent.load import load_week_talent
+
         mlb = load_mlb_week(args.clean_root, args.season, args.week)
         usage = f"real MLB usage from {args.season} week {args.week}"
+        recs = {str(p.mlb_id): elig.players.get(p.mlb_id) for r in rosters.values() for p in r}
+        hands = {pid: rec.bats for pid, rec in recs.items() if rec and rec.bats}
+        talent = load_week_talent(args.clean_root, args.season, args.week, hands)
+        ability = f"the talent blend for {args.season} week {args.week}"
     schedule = round_robin(teams)
-    result = sim_week(cards, rosters, elig, schedule, mlb, args.seed)
-    print(f"Playing time: {usage}\n")
+    result = sim_week(cards, rosters, elig, schedule, mlb, args.seed, talent=talent)
+    print(f"Playing time: {usage}\nAbility: {ability}\n")
     for g in result.games:
         f = g["events"][-1]
         print(f"Day {g['day'] + 1}: {g['away']} {f['away']}, {g['home']} {f['home']}")
@@ -269,7 +280,7 @@ def _sim_week(args: argparse.Namespace) -> int:
     if args.out:
         title = f"NPL test week ({args.season}" + (f", week {args.week})" if args.week else ")")
         names = {str(p.mlb_id): p.name for r in rosters.values() for p in r}
-        subtitle = f"Playing time: {usage}. Seed {args.seed}."
+        subtitle = f"Playing time: {usage}. Ability: {ability}. Seed {args.seed}."
         index = write_week(result, args.out, title, subtitle, names)
         print(f"\nWrote {index}")
     if args.save:

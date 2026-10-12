@@ -8,9 +8,9 @@ the pen, bench and fielding from position eligibility. The week then runs
 under `engine.workload.play_week`, with each player's real MLB week when the
 pipeline's clean tables are at hand, or a sample full-time week otherwise.
 
-Player ability is still league average by handedness (the three-layer
-weekly blend is the rest of Milestone 7), so results test the machinery,
-not the rosters' talent.
+With `talent` (talent.load.WeekTalent) each player plays at his blended
+ability for the week (Milestone 7); without it everyone is league average
+by handedness, which tests the machinery, not the rosters' talent.
 """
 
 from __future__ import annotations
@@ -186,12 +186,18 @@ def sim_week(
     seed: int,
     carry: dict[str, Carry] | None = None,
     env=DEFAULT_ENV,
+    talent=None,
 ) -> WeekResult:
     """Play a week between saved lineup cards (keyed by team name).
     `mlb_week` None plays a typical week from each player's season pace
-    (default_week). Each game's events are
+    (default_week). `talent` (a talent.load.WeekTalent) gives every player
+    his blended ability for the week and the league its real environment;
+    None keeps everyone league average. Each game's events are
     simulate_game's, so box scores and game pages render as usual."""
     teams = {name: week_team(name, cards[name], rosters[name], elig) for name in cards}
+    if talent is not None:
+        teams = {name: talent.team(t) for name, t in teams.items()}
+        env = talent.league.env()
     mlb = mlb_week if mlb_week is not None else default_week(teams, rosters, elig, seed)
     return play_week(teams, schedule, mlb, env, seed, carry)
 

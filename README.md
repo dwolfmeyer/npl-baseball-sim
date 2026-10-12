@@ -101,7 +101,27 @@ team's orders vs LHP and RHP, the rotation with each slot's plan, the pen and
 bench. Without `--week` each player gets a typical week at his season pace
 from the eligibility data (full time when he has none). `--out` writes a week
 page with standings and who sat or filled in, plus a Gameday page per game;
-`--save` adds the games to the web app. Ability is still league average.
+`--save` adds the games to the web app. Without `--week` everyone is league
+average; with it, each player plays at his talent blend for that week.
+
+Weekly talent blend (`npl_sim/talent/`, Milestone 7): each player's ability
+for a sim week, built from Statcast pitches in three layers, each an index
+against the league for the same handedness matchup. Baseline weights this
+season before the week and the two seasons before it 5/4/3, every PA measured
+against its own season's league, regressed by stabilization points; platoon
+splits come from prior seasons (this season only for players with no split
+data). Process compares the week's whiff, chase, zone, barrel, xBA-on-contact,
+hard-hit, fastball velocity and Stuff+ (per pitch, regressed by pitch count)
+with the player's own baseline. Results add what the week's outcomes show
+beyond that, regressed three times as hard. The league environment comes from
+the same season's PAs, and every PA's expectations are scaled by Savant's park
+factors for the park it was played in, so hitters' records are park-neutral.
+Fielding (`talent/fielding.py`): fielding runs prevented (OAA) per 600 balls in
+play at a player's primary position (this season and last, 5/4, regressed),
+half of it at his other experienced spots; catcher framing runs the same way;
+arms from pop time (catchers) and outfield arm strength. `npl-sim sim-week
+--week N` plays at the blend; the weights are first guesses for Milestone 8
+calibration.
 
 Out-of-position defense (`engine/fielding.py`): each hitter carries his
 fielding value at the positions he's experienced at (`Hitter.positions`).
