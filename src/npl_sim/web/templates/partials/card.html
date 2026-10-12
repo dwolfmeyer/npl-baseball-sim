@@ -111,7 +111,7 @@
 </section>
 <section class="card">
   <h2>Situational defense</h2>
-  <p class="muted small">Leave these off to play straight up all game. Saved on the card now; the engine applies them once its in-game logic lands.</p>
+  <p class="muted small">Leave these off to play straight up all game. When more than one fits, the first one listed wins.</p>
   {% for key, text in defense_rules.items() %}
   <label class="check"><input type="checkbox" id="def_{{ key }}" name="def_{{ key }}" value="1" {% if card.defense.get(key) %}checked{% endif %}> {{ text }}</label>
   {% endfor %}

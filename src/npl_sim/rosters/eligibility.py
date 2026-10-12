@@ -1,10 +1,11 @@
-"""Position eligibility: a player can field a position he played in at least
-20 MLB games last season or 10 games this season (the league's rule). Anyone
-can DH.
+"""Games by position and batting hands for rostered players, saved for the
+lineup card. The eligibility rule itself (20 MLB games at a position last
+season or 10 this season) lives in `npl_sim.eligibility`.
 
-Games by position come from the MLB Stats API's season fielding splits and
-are saved, with each player's batting and throwing hand, in one JSON file per
-NPL season (`data/eligibility/<season>.json`):
+Games come from the MLB Stats API's season fielding splits, which the lineup
+card can use before the pipeline has a season of box scores. They are saved,
+with each player's batting and throwing hand, in one JSON file per NPL season
+(`data/eligibility/<season>.json`):
 
     {"season": 2026, "players": {"<mlbam id>": {"bats": "L", "throws": "R",
      "games": {"2025": {"SS": 152}, "2026": {"SS": 40, "3B": 3}}}}}
@@ -17,12 +18,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from npl_sim.eligibility import FIELD_POSITIONS, eligible_positions, qualifying
 from npl_sim.pipeline.http import Http
 from npl_sim.pipeline.statsapi import BASE, PEOPLE_BATCH
 
-FIELD_POSITIONS = ("C", "1B", "2B", "3B", "SS", "LF", "CF", "RF")
-LAST_SEASON_GAMES = 20
-THIS_SEASON_GAMES = 10
 DEFAULT_DIR = Path("data/eligibility")
 
 
@@ -38,18 +37,20 @@ class Eligibility:
     season: int
     players: dict[int, PlayerRecord] = field(default_factory=dict)
 
-    def positions(self, mlbam_id: int) -> set[str] | None:
-        """Positions this player may field, or None when there is no record of him."""
+    def _games(self, mlbam_id: int) -> tuple[dict | None, dict | None]:
         rec = self.players.get(mlbam_id)
         if rec is None:
-            return None
-        last = rec.games.get(self.season - 1, {})
-        this = rec.games.get(self.season, {})
-        return {
-            pos
-            for pos in FIELD_POSITIONS
-            if last.get(pos, 0) >= LAST_SEASON_GAMES or this.get(pos, 0) >= THIS_SEASON_GAMES
-        }
+            return None, None
+        return rec.games.get(self.season - 1), rec.games.get(self.season)
+
+    def positions(self, mlbam_id: int, listed: str | None = None) -> set[str]:
+        """Field positions this player may play (DH aside), falling back to his
+        listed NPL position when he has no qualifying games."""
+        return eligible_positions(*self._games(mlbam_id), listed=listed) - {"DH"}
+
+    def qualifies(self, mlbam_id: int) -> bool:
+        """Whether his eligibility comes from MLB games rather than the fallback."""
+        return bool(qualifying(*self._games(mlbam_id)))
 
     def games_text(self, mlbam_id: int) -> str:
         """e.g. "SS 152, 3B 4 ('25) · SS 40 ('26)" for tooltips."""

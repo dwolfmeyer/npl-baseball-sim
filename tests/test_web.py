@@ -54,9 +54,10 @@ def test_eligibility_rule():
     by_id = {p.mlb_id: p for p in roster(DUCKS)}
     assert ELIG.positions(HENDERSON) == {"SS"}  # 4 games at 3B last season is not enough
     assert ELIG.positions(SANOJA) == {"2B"}  # 10 this season counts; 9 at SS does not
-    assert ELIG.positions(TROUT) == set()  # DH only
+    # 15 games in RF last season and 3 this season don't qualify: listed OF stands in.
+    assert ELIG.positions(TROUT, "OF") == {"LF", "CF", "RF"} and not ELIG.qualifies(TROUT)
     assert ELIG.positions(GOODMAN) == {"C", "RF"}
-    # No MLB fielding record: the NPL roster position stands in.
+    # No MLB fielding record: the listed NPL position stands in.
     assert fielding(by_id[701538], ELIG) == ({"LF", "CF", "RF"}, False)
 
     card = default_card(roster(DUCKS), ELIG)
@@ -234,3 +235,12 @@ def test_parse_people_fielding():
     rec = parse_people_fielding(raw, [2025])[HENDERSON]
     assert (rec.bats, rec.throws) == ("L", "R")
     assert rec.games == {2025: {"SS": 150, "3B": 4}}
+
+
+def test_defense_boxes_become_engine_rules():
+    r = roster(DUCKS)
+    card = default_card(r, ELIG)
+    assert team_card(DUCKS, "DUC", card, r, 0, "R", ELIG).alignment_rules == ()
+    card.defense = {"guard_lines": True, "infield_in": True}
+    rules = team_card(DUCKS, "DUC", card, r, 0, "R", ELIG).alignment_rules
+    assert [rule.preset for rule in rules] == ["infield_in", "guard_lines"]

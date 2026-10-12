@@ -6,15 +6,17 @@ and situational defense.
 The card is checked against the roster and position eligibility (see
 `npl_sim.rosters.eligibility`) and turned into the engine's `TeamCard`. Until
 the weekly cards from the data pipeline land, every player sims with
-league-average rates. The engine uses pitch limits, openers and piggybacks
-now; the times-through-the-order hook and situational defense are saved on
-the card for the engine's lineup and bullpen logic (Milestone 6).
+league-average rates. The engine uses pitch limits, openers, piggybacks and
+situational defense now; the times-through-the-order hook is saved on the
+card for the engine's lineup and bullpen logic (Milestone 6).
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
 
+from npl_sim.eligibility import LISTED_FALLBACK
+from npl_sim.engine.alignment import AlignmentRule
 from npl_sim.engine.game import TeamCard
 from npl_sim.engine.sample import hitter, pitcher
 from npl_sim.rosters.eligibility import Eligibility
@@ -36,24 +38,14 @@ DEFENSE_RULES = {
     "infield_in": "Infield in with a runner on 3rd and fewer than 2 outs, "
     "7th inning or later, tied or within a run",
     "dp_depth": "Double-play depth with a runner on 1st and fewer than 2 outs",
-    "guard_lines": "Guard the lines in the 8th or later with a lead of 1 to 3 runs",
+    "guard_lines": "Guard the lines in the 8th or later with a lead of 1 or 2 runs",
 }
-
-# Roster positions used when a player has no MLB fielding record at all.
-_ROSTER_POSITIONS = {
-    "C": {"C"},
-    "1B": {"1B"},
-    "2B": {"2B"},
-    "3B": {"3B"},
-    "SS": {"SS"},
-    "IF": {"1B", "2B", "3B", "SS"},
-    "OF": {"LF", "CF", "RF"},
-    "LF": {"LF"},
-    "CF": {"CF"},
-    "RF": {"RF"},
-    "UT": {"1B", "2B", "3B", "SS", "LF", "CF", "RF"},
+# The engine's rule for each box, checked in this order; the first that fits wins.
+DEFENSE_ENGINE_RULES = {
+    "infield_in": AlignmentRule("infield_in", from_inning=7, min_lead=-1, max_lead=1),
+    "dp_depth": AlignmentRule("double_play"),
+    "guard_lines": AlignmentRule("guard_lines", from_inning=8, min_lead=1, max_lead=2),
 }
-
 
 _INFIELD = {"1B", "2B", "3B", "SS"}
 
@@ -64,12 +56,10 @@ def is_pitcher(p: NplPlayer) -> bool:
 
 def fielding(p: NplPlayer, elig: Eligibility | None) -> tuple[set[str], bool]:
     """Positions the player may field and whether that came from MLB games
-    (True) or, lacking any MLB fielding record, his NPL roster position."""
+    (True) or from his listed NPL position (False)."""
     if elig is not None and p.mlb_id is not None:
-        rec = elig.players.get(p.mlb_id)
-        if rec is not None and any(rec.games.get(s) for s in (elig.season - 1, elig.season)):
-            return elig.positions(p.mlb_id) or set(), True
-    return set(_ROSTER_POSITIONS.get(p.position.upper(), set())), False
+        return elig.positions(p.mlb_id, p.position), elig.qualifies(p.mlb_id)
+    return set(LISTED_FALLBACK.get(p.position.upper(), set())), False
 
 
 def can_play(p: NplPlayer, position: str, elig: Eligibility | None = None) -> bool:
@@ -314,6 +304,9 @@ def team_card(
         # Right-handed when the hand isn't known yet.
         bats = rec.bats if rec and rec.bats in ("L", "R", "S") else "R"
         lineup.append((replace(hitter(str(pid), bats=bats), name=by_id[pid].name), pos))
+    alignment_rules = tuple(
+        rule for key, rule in DEFENSE_ENGINE_RULES.items() if card.defense.get(key)
+    )
 
     def arm(pid: int, limit: int):
         p = by_id[pid]
@@ -339,4 +332,11 @@ def team_card(
         key=lambda pid: ROLE_ORDER.index(card.roles[pid]),
     )
     bullpen = bulk + [arm(pid, 25) for pid in pen_ids]
-    return TeamCard(name=team, lineup=lineup, starter=first, bullpen=bullpen, abbr=abbr)
+    return TeamCard(
+        name=team,
+        lineup=lineup,
+        starter=first,
+        bullpen=bullpen,
+        abbr=abbr,
+        alignment_rules=alignment_rules,
+    )
