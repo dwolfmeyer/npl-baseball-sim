@@ -12,6 +12,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
+from npl_sim.engine import bullpen as pen
 from npl_sim.engine import detail
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
@@ -92,6 +93,11 @@ class TeamCard:
     steal_aggressiveness: float = 1.0  # 0 = never run, 1 = normal, 2 = aggressive
     abbr: str = ""  # short name for scores in the play log; defaults to the first 3 letters
     defensive_subs: tuple[DefensiveSub, ...] = ()
+    # Bullpen designations by pitcher id. Empty = relievers enter in listed order.
+    relief: dict[str, pen.ReliefUsage] = field(default_factory=dict)
+    # Bullpen arms who follow in fixed order before anyone is picked by
+    # leverage: the starter after an opener, a piggyback.
+    follow: tuple[str, ...] = ()
 
     @property
     def short(self) -> str:
@@ -110,7 +116,8 @@ class _Side:
     card: TeamCard
     slot: int = 0
     pitcher: Pitcher | None = None
-    pen_index: int = 0
+    used: set[str] = field(default_factory=set)  # pitchers who have appeared
+    pitcher_outs: int = 0  # outs recorded by the current pitcher
     pitches: int = 0
     batters_faced: int = 0
     runs: int = 0
@@ -158,16 +165,18 @@ class GameSim:
 
     def _maybe_change_pitcher(self, mid_inning: bool) -> None:
         side = self._fielding()
-        limit = side.pitcher.pitch_limit
-        over = side.pitches >= limit + (15 if mid_inning else 0)
-        if not over or side.pen_index >= len(side.card.bullpen):
+        if not self._should_pull(side, mid_inning):
+            return
+        new, detail_ = self._next_pitcher(side, mid_inning)
+        if new is None:
             return
         old = side.pitcher
         on_base = sum(r is not None for r in self.bases) if mid_inning else 0
-        side.pitcher = side.card.bullpen[side.pen_index]
-        side.pen_index += 1
+        side.pitcher = new
+        side.used.add(new.id)
         side.pitches = 0
         side.batters_faced = 0
+        side.pitcher_outs = 0
         side.pitchers_used.append(side.pitcher.id)
         self._log(
             "pitching_change",
@@ -176,7 +185,41 @@ class GameSim:
             into=side.pitcher.id,
             outs=self.outs if mid_inning else 0,
             on_base=on_base,
+            **detail_,
         )
+
+    def _should_pull(self, side: _Side, mid_inning: bool) -> bool:
+        p = side.pitcher
+        if side.pitches >= p.pitch_limit + (15 if mid_inning else 0):
+            return True
+        plan = side.card.relief.get(p.id)
+        is_reliever = p.id != side.card.starter.id and p.id not in side.card.follow
+        if mid_inning or plan is None or not is_reliever:
+            return False
+        # Between innings: would he run past his stint if he went out again?
+        return side.pitcher_outs + 3 > plan.outs + 1
+
+    def _next_pitcher(self, side: _Side, mid_inning: bool):
+        card = side.card
+        available = [p for p in card.bullpen if p.id not in side.used and p.id != side.pitcher.id]
+        for pid in card.follow:
+            nxt = next((p for p in available if p.id == pid), None)
+            if nxt is not None:
+                return nxt, {}
+        available = [p for p in available if p.id not in card.follow]
+        if not available:
+            return None, {}
+        if not card.relief:
+            return available[0], {}  # no designations: listed order
+        offense = self._batting()
+        batter = offense.lineup[offense.slot][0] if offense.lineup else None
+        lead = side.runs - offense.runs
+        bases, outs = (self.bases, self.outs) if mid_inning else ([None] * 3, 0)
+        li = pen.leverage(self.inning, self.half, lead, bases, outs)
+        starter_out = side.pitcher.id == card.starter.id or side.pitcher.id in card.follow
+        tier = pen.situation(self.inning, lead, li, starter_out)
+        pick = pen.choose(available, card.relief, tier, mid_inning, batter)
+        return pick, {"leverage": li, "situation": tier}
 
     # -- the game ------------------------------------------------------------
     def _start(self) -> None:
@@ -312,6 +355,7 @@ class GameSim:
         else:
             self.bases[0] = None
             self.outs += 1
+            defense.pitcher_outs += 1
             kind = "caught_stealing"
         self._log(
             kind,
@@ -364,6 +408,7 @@ class GameSim:
         scored: list[dict] = []
         outcome = self._resolve(result, hitter, pitcher, scored)
         rbi = len(scored) if outcome not in ("E", "DP") else 0
+        defense.pitcher_outs += self.outs - outs_before
         bip = kind if ":" in result else None
         drng = self.detail_rng
         balls, strikes, strikes_thrown = detail.count(drng, "BIP" if bip else kind, pitches)

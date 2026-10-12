@@ -67,6 +67,14 @@ ticks alignment rules (`engine/alignment.py`): infield in with a runner on
 third, double-play depth conceding the run, guard the lines or no doubles,
 each optionally limited by inning and score.
 
+Bullpen (`engine/bullpen.py`): owners tag relievers high, medium or low
+leverage, mop-up, long or any, start-of-inning only, a same-side matchup
+specialist, and a stint length. No closer is required. When a pitcher comes
+out the engine estimates leverage from inning, score and base-out state and
+picks from the matching tier, preferring the platoon edge on the next batter,
+then the owner's order. Openers' starters and piggybacks (`TeamCard.follow`)
+enter first, in order. Untagged pens enter in listed order.
+
 Position eligibility (`npl_sim/eligibility.py`): 20 MLB games at a position
 last season or 10 this season, counted from box scores; players with no
 qualifying games yet fall back to their listed NPL position. Anyone can DH.
