@@ -106,6 +106,12 @@ def create_app(
             positions, from_games = lineup.fielding(h, elig)
             fields[h.mlb_id] = {
                 "positions": [p for p in lineup.POSITIONS if p in positions],
+                # Runs per 600 balls in play at each spot he isn't eligible at.
+                "costs": {
+                    p: round(lineup.position_cost(h, p, elig))
+                    for p in lineup.POSITIONS
+                    if p != "DH" and p not in positions
+                },
                 "from_games": from_games,
                 "games": elig.games_text(h.mlb_id),
             }

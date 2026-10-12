@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 
 from npl_sim.eligibility import FIELD_POSITIONS, LISTED_FALLBACK
+from npl_sim.engine import fielding as glove
 from npl_sim.engine.alignment import AlignmentRule
 from npl_sim.engine.bullpen import ReliefUsage
 from npl_sim.engine.game import DefensiveSub as EngineSub
@@ -78,6 +79,24 @@ def fielding(p: NplPlayer, elig: Eligibility | None) -> tuple[set[str], bool]:
     if elig is not None and p.mlb_id is not None:
         return elig.positions(p.mlb_id, p.position), elig.qualifies(p.mlb_id)
     return set(LISTED_FALLBACK.get(p.position.upper(), set())), False
+
+
+def glove_positions(p: NplPlayer, elig: Eligibility | None = None) -> dict[str, float]:
+    """The engine's fielding ratings for him: average (0.0) at each position he's
+    eligible at; anywhere else is charged along the defensive spectrum."""
+    return {pos: 0.0 for pos in fielding(p, elig)[0]}
+
+
+def position_cost(p: NplPlayer, position: str, elig: Eligibility | None = None) -> float:
+    """Fielding runs per 600 balls in play at `position` (negative is worse)."""
+    return glove.rating_at(glove_positions(p, elig), position)
+
+
+def cost_text(runs: float) -> str:
+    """e.g. "-5 runs per 600 balls in play there"."""
+    if round(runs) == 0:
+        return "about average there"
+    return f"{runs:+.0f} runs per 600 balls in play there"
 
 
 def can_play(p: NplPlayer, position: str, elig: Eligibility | None = None) -> bool:
@@ -325,8 +344,10 @@ def validate(card: LineupCard, roster: list[NplPlayer], elig: Eligibility | None
             elif pid in by_id and pos and not can_play(by_id[pid], pos, elig):
                 where = ", ".join(sorted(fielding(by_id[pid], elig)[0])) or "DH only"
                 # Allowed, as in Scoresheet: he plays out of position with a defensive penalty.
+                cost = position_cost(by_id[pid], pos, elig)
                 check.warnings.append(
-                    f"{name(pid)} is out of position at {pos} {label} (eligible: {where})."
+                    f"{name(pid)} is out of position at {pos} {label} (eligible: {where}; "
+                    f"{cost_text(cost)})."
                 )
 
     starters = [pid for pid in card.rotation if pid is not None]
@@ -370,8 +391,10 @@ def validate(card: LineupCard, roster: list[NplPlayer], elig: Eligibility | None
         if sub.position not in POSITIONS or sub.position == "DH":
             check.errors.append(f"Pick a field position for defensive replacement {who}.")
         elif not can_play(by_id[sub.player], sub.position, elig):
+            cost = position_cost(by_id[sub.player], sub.position, elig)
             check.warnings.append(
-                f"Defensive replacement {who} is out of position at {sub.position}."
+                f"Defensive replacement {who} is out of position at {sub.position} "
+                f"({cost_text(cost)})."
             )
         if sub.replaces is not None and sub.replaces not in starting:
             check.errors.append(
@@ -554,7 +577,11 @@ def team_card(
         rec = elig.players.get(pid) if elig else None
         # Right-handed when the hand isn't known yet.
         bats = rec.bats if rec and rec.bats in ("L", "R", "S") else "R"
-        return replace(hitter(str(pid), bats=bats), name=by_id[pid].name)
+        return replace(
+            hitter(str(pid), bats=bats),
+            name=by_id[pid].name,
+            positions=glove_positions(by_id[pid], elig),
+        )
 
     lineup = [(bat(pid), pos) for pid, pos in card.orders[side]]
     starting = {pid for pid, _ in card.orders[side]}

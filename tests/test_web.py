@@ -18,6 +18,7 @@ from npl_sim.web.lineup import (
     autofill,
     default_card,
     fielding,
+    position_cost,
     team_card,
     validate,
 )
@@ -69,7 +70,10 @@ def test_eligibility_rule():
     card.orders["rhp"] = [*rhp, (HENDERSON, "3B")]
     assert HENDERSON in card.active
     warnings = " ".join(validate(card, roster(DUCKS), ELIG).warnings)
-    assert "Gunnar Henderson is out of position at 3B vs RHP (eligible: SS)" in warnings
+    assert (
+        "Gunnar Henderson is out of position at 3B vs RHP "
+        "(eligible: SS; -2 runs per 600 balls in play there)" in warnings
+    )
 
 
 def test_validate_catches_bad_cards():
@@ -478,3 +482,18 @@ def test_sim_a_week(client):
     home = client.get("/").text
     assert "Test week 1" in home
     assert client.get("/weeks/99").status_code == 404
+
+
+def test_out_of_position_defense_reaches_the_engine(client):
+    r = roster(DUCKS)
+    by_id = {p.mlb_id: p for p in r}
+    # A shortstop moving down the spectrum costs less than a first baseman moving up.
+    assert position_cost(by_id[HENDERSON], "3B", ELIG) > position_cost(by_id[HENDERSON], "C", ELIG)
+    assert position_cost(by_id[HENDERSON], "SS", ELIG) == 0.0
+    card = default_card(r, ELIG)
+    tc = team_card("Ducks", "MDK", card, r, 0, "R", ELIG)
+    for h, _ in tc.lineup:
+        assert h.positions == {pos: 0.0 for pos in fielding(by_id[int(h.id)], ELIG)[0]}
+    # The position dropdown shows the cost of an out-of-position spot.
+    page = client.get("/teams/midwest-ducksnorts/lineup").text
+    assert "· out of pos, -" in page
