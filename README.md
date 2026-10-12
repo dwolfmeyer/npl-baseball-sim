@@ -95,6 +95,14 @@ no third day in a row, and a day off after 25 pitches (two after 40). Unused
 starts, the rotation turn and rest carry into next week. `npl_sim/playing_time.py`
 reads a real week from the pipeline's clean tables.
 
+`npl-sim sim-week` (`npl_sim/simweek.py`) plays a week between the test teams'
+saved lineup cards (default cards when none are saved): a round robin, each
+team's orders vs LHP and RHP, the rotation with each slot's plan, the pen and
+bench. Without `--week` each player gets a typical week at his season pace
+from the eligibility data (full time when he has none). `--out` writes a week
+page with standings and who sat or filled in, plus a Gameday page per game;
+`--save` adds the games to the web app. Ability is still league average.
+
 Position eligibility (`npl_sim/eligibility.py`): 20 MLB games at a position
 last season or 10 this season, counted from box scores; players with no
 qualifying games yet fall back to their listed NPL position. Anyone can DH.
@@ -103,6 +111,8 @@ qualifying games yet fall back to their listed NPL position. Anyone can DH.
 npl-sim demo-game --seed 3 --plays scoring   # two league-average teams
 npl-sim demo-game --seed 3 --html game.html  # Gameday-style page: Box / Play-by-play
 npl-sim demo-week --seed 2                   # a week under the playing-time budget
+npl-sim sim-week --out week/                 # the test teams' lineup cards, one week
+npl-sim sim-week --week 12 --out week/       # ...with 2026 week 12's real MLB usage
 ```
 
 League structure lives in `config/league.yaml`. When divisions realign, add a

@@ -15,6 +15,7 @@ not the rosters' talent.
 
 from __future__ import annotations
 
+import random
 from dataclasses import replace
 
 from npl_sim.engine.defaults import DEFAULT_ENV
@@ -122,6 +123,47 @@ def sample_mlb_week(teams: dict[str, WeekTeam]) -> MlbWeek:
     return MlbWeek(pa=pa, starts=starts, relief_outs=relief)
 
 
+SEASON_WEEKS = 26.5
+PA_PER_GAME = 4.2
+
+
+def typical_mlb_week(
+    rosters: dict[str, list[NplPlayer]], elig: Eligibility, season: int, seed: int
+) -> MlbWeek:
+    """A plausible MLB week for each rostered player from his season pace in
+    the eligibility data: games played x 4.2 PA, starts, and relief outs, each
+    divided over the season's weeks and rounded at random (a pitcher who
+    starts 1.2 times a week gets two starts in some weeks). Players with no
+    games this season don't play."""
+    rng = random.Random(seed)
+
+    def draw(per_week: float) -> int:
+        whole = int(per_week)
+        return whole + (rng.random() < per_week - whole)
+
+    pa, starts, relief = {}, {}, {}
+    for roster in rosters.values():
+        for p in roster:
+            rec = elig.players.get(p.mlb_id)
+            if rec is None:
+                continue
+            pid = str(p.mlb_id)
+            line = rec.pitching.get(season, {})
+            if line.get("g"):
+                gs, g, outs = line.get("gs", 0), line["g"], line.get("outs", 0)
+                starts[pid] = draw(gs / SEASON_WEEKS)
+                relief_share = (g - gs) / g if gs else 1.0
+                relief[pid] = draw(outs * relief_share / SEASON_WEEKS)
+            games = sum(rec.games.get(season, {}).values())
+            if games and not lineup.is_pitcher(p):
+                pa[pid] = round(draw(min(7.0, games / SEASON_WEEKS)) * PA_PER_GAME)
+    return MlbWeek(
+        pa={k: v for k, v in pa.items() if v},
+        starts={k: v for k, v in starts.items() if v},
+        relief_outs={k: v for k, v in relief.items() if v},
+    )
+
+
 def sim_week(
     cards: dict[str, lineup.LineupCard],
     rosters: dict[str, list[NplPlayer]],
@@ -133,8 +175,33 @@ def sim_week(
     env=DEFAULT_ENV,
 ) -> WeekResult:
     """Play a week between saved lineup cards (keyed by team name).
-    `mlb_week` None plays a sample full-time week. Each game's events are
+    `mlb_week` None plays a typical week from each player's season pace
+    (default_week). Each game's events are
     simulate_game's, so box scores and game pages render as usual."""
     teams = {name: week_team(name, cards[name], rosters[name], elig) for name in cards}
-    mlb = mlb_week if mlb_week is not None else sample_mlb_week(teams)
+    mlb = mlb_week if mlb_week is not None else default_week(teams, rosters, elig, seed)
     return play_week(teams, schedule, mlb, env, seed, carry)
+
+
+def default_week(
+    teams: dict[str, WeekTeam],
+    rosters: dict[str, list[NplPlayer]],
+    elig: Eligibility | None,
+    seed: int,
+) -> MlbWeek:
+    """The week to play when no real MLB week is given: each player's season
+    pace where the eligibility data has him, a full-time week otherwise."""
+    sample = sample_mlb_week(teams)
+    if elig is None:
+        return sample
+    typical = typical_mlb_week(rosters, elig, elig.season, seed)
+    known = {str(p.mlb_id) for r in rosters.values() for p in r if p.mlb_id in elig.players}
+
+    def merge(pace: dict, full: dict) -> dict:
+        return {**{k: v for k, v in full.items() if k not in known}, **pace}
+
+    return MlbWeek(
+        pa=merge(typical.pa, sample.pa),
+        starts=merge(typical.starts, sample.starts),
+        relief_outs=merge(typical.relief_outs, sample.relief_outs),
+    )
