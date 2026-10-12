@@ -383,3 +383,29 @@ def test_sync_players_and_lineup_locks():
     finally:
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_framing_reads_the_new_leaderboard_csv():
+    class BomCsv:
+        def get(self, url, params=None):
+            assert "/leaderboard/catcher-framing" in url and "minPitches=1" in url
+            return '﻿"id","name","pitches","rv_tot"\n669221,"Raleigh, Cal",4000,12\n'.encode()
+
+    raw, _ = savant.fetch_leaderboard(BomCsv(), "framing", 2025)
+    out = savant.clean_leaderboard("framing", raw, 2025, date(2025, 9, 28))
+    assert list(out["mlbam_id"]) == [669221] and out.loc[0, "rv_tot"] == 12
+
+
+def test_showcase_game_on_a_config_off_day_is_accepted():
+    slate = [
+        sched_game(100 + i, d, NYY, SF) for d in ("2026-07-12", "2026-07-17") for i in range(9)
+    ]
+    raw = schedule(*slate, sched_game(1, "2026-07-16", NYY, SF))
+    actual = calendar_check.derive_calendar(raw)
+    config = actual.model_copy(update={"off_days": [date(2026, 7, d) for d in (13, 14, 15, 16)]})
+    counts = calendar_check.games_per_date(raw)
+    assert calendar_check.compare(config, actual, counts) == []
+    config = actual.model_copy(update={"off_days": [date(2026, 7, d) for d in (13, 14, 15)]})
+    assert calendar_check.compare(config, actual, counts) == []
+    config = actual.model_copy(update={"off_days": [date(2026, 7, d) for d in (13, 14)]})
+    assert calendar_check.compare(config, actual, counts)  # Jul 15 really is off

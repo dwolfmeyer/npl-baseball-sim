@@ -114,9 +114,8 @@ class Pipeline:
         self.raw.put_bytes(src, "transactions", self.season, key, "json", body, turl)
 
     def _pull_statcast(self, start: date, end: date, refresh: bool) -> None:
+        # Off days included: a showcase game can fall on an NPL off day.
         for day in _days(start, end):
-            if day in self.calendar.off_days:
-                continue
             key = day.isoformat()
             if not refresh and self.raw.has(savant.SOURCE, "statcast", self.season, key, "parquet"):
                 continue
@@ -313,8 +312,9 @@ class Pipeline:
         self.raw.put_bytes(
             statsapi.SOURCE, "schedule", self.season, "full-season", "json", data, url
         )
-        actual = calendar_check.derive_calendar(json.loads(data))
-        return calendar_check.compare(self.calendar, actual)
+        raw = json.loads(data)
+        actual = calendar_check.derive_calendar(raw)
+        return calendar_check.compare(self.calendar, actual, calendar_check.games_per_date(raw))
 
 
 def league_totals(games: pd.DataFrame, batting: pd.DataFrame, week: Week) -> pd.DataFrame:
