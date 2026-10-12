@@ -16,6 +16,9 @@ class SeasonCalendar(BaseModel):
     opening_day: date
     final_day: date
     off_days: list[date] = []
+    # Regular-season games before opening_day (Opening Night, international
+    # series). No NPL games those days; their MLB stats count toward week 1.
+    openers: list[date] = []
 
 
 @dataclass(frozen=True)
@@ -50,3 +53,19 @@ def sim_weeks(cal: SeasonCalendar) -> list[Week]:
         weeks.append(Week(number=len(weeks) + 1, start=monday, game_days=days))
         monday += timedelta(days=7)
     return weeks
+
+
+def week_for_date(weeks: list[Week], day: date) -> Week | None:
+    """The sim week whose MLB stats include `day`.
+
+    Opener games before week 1 fold into week 1; days after the last week
+    belong to no week.
+    """
+    if not weeks:
+        return None
+    if day < weeks[0].start:
+        return weeks[0]
+    for week in weeks:
+        if week.start <= day <= week.end:
+            return week
+    return None

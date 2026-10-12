@@ -1,18 +1,25 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`, `demo-game`."""
+`generate-schedule`, `demo-game`, and the MLB data pipeline (`pull-week`, `backfill`,
+`check-calendar`, `sync-mlb`)."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from collections.abc import Sequence
 from datetime import date
+from pathlib import Path
 
+import pandas as pd
 from sqlalchemy.orm import Session
 
 from npl_sim.db import get_engine
 from npl_sim.db.seed import sync_alignment
 from npl_sim.league import load_league_file, team_slots
+from npl_sim.pipeline.db import set_lineup_locks, sync_players
+from npl_sim.pipeline.run import DEFAULT_CLEAN_ROOT, SOURCES, Pipeline, lineup_locks
+from npl_sim.pipeline.snapshots import DEFAULT_RAW_ROOT, SnapshotStore
 from npl_sim.rosters.importer import get_or_create_week, import_rosters
 from npl_sim.rosters.sources import players_from_database, players_from_dump
 from npl_sim.schedule.calendar import load_calendar, sim_weeks
@@ -51,7 +58,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     demo.add_argument("--seed", type=int, default=1)
     demo.add_argument("--pbp", action="store_true", help="also print play-by-play")
 
+    def pipeline_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--season", type=int, required=True)
+        p.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_ROOT)
+        p.add_argument("--clean-dir", type=Path, default=DEFAULT_CLEAN_ROOT)
+        p.add_argument("--source", action="append", choices=SOURCES, help="limit sources")
+
+    pull = sub.add_parser("pull-week", help="pull, normalize and freeze one MLB week")
+    pipeline_args(pull)
+    pull.add_argument("--week", type=int, required=True, help="sim week number")
+    pull.add_argument("--refresh", action="store_true", help="re-fetch snapshots we already have")
+    pull.add_argument("--no-freeze", action="store_true", help="leave the week open")
+
+    back = sub.add_parser("backfill", help="load a completed season week by week")
+    pipeline_args(back)
+    back.add_argument("--from-week", type=int, default=1)
+    back.add_argument("--to-week", type=int)
+
+    cal = sub.add_parser("check-calendar", help="compare config/calendar.yaml with MLB")
+    pipeline_args(cal)
+
+    mlb = sub.add_parser("sync-mlb", help="write handedness and lineup locks to the DB")
+    pipeline_args(mlb)
+
     args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     league_file = load_league_file()
 
     if args.cmd == "league-check":
@@ -113,6 +144,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(format_box(box))
         if args.pbp:
             print("\n" + "\n".join(box.play_by_play))
+    elif args.cmd in ("pull-week", "backfill", "check-calendar", "sync-mlb"):
+        return _pipeline_command(args)
+    return 0
+
+
+def _pipeline_command(args: argparse.Namespace) -> int:
+    pipe = Pipeline(
+        season=args.season,
+        calendar=load_calendar(args.season),
+        raw=SnapshotStore(args.raw_dir),
+        clean_root=args.clean_dir,
+        sources=tuple(args.source or SOURCES),
+    )
+    if args.cmd == "pull-week":
+        week = pipe.week(args.week)
+        pipe.run_week(week, freeze=not args.no_freeze, refresh=args.refresh)
+        print(f"{args.season} week {week.number} ({week.start} to {week.end}) done")
+    elif args.cmd == "backfill":
+        last = args.to_week or len(pipe.weeks)
+        pipe.backfill(pipe.weeks[args.from_week - 1 : last])
+        print(f"Backfilled {args.season} weeks {args.from_week}-{last}")
+    elif args.cmd == "check-calendar":
+        problems = pipe.check_calendar()
+        for p in problems:
+            print(f"MISMATCH: {p}")
+        if problems:
+            return 1
+        print(f"config/calendar.yaml matches the MLB {args.season} schedule")
+    elif args.cmd == "sync-mlb":
+        season_dir = Path(args.clean_dir) / str(args.season)
+        players = pd.read_parquet(season_dir / "players.parquet")
+        frames = [pd.read_parquet(p) for p in sorted(season_dir.glob("week-*/games.parquet"))]
+        games = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        with Session(get_engine()) as session, session.begin():
+            n_players = sync_players(session, players)
+            n_weeks = set_lineup_locks(session, args.season, lineup_locks(games, pipe.weeks))
+        print(f"Updated handedness for {n_players} players and lineup locks for {n_weeks} weeks")
     return 0
 
 
