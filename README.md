@@ -104,6 +104,18 @@ page with standings and who sat or filled in, plus a Gameday page per game;
 `--save` adds the games to the web app. Without `--week` everyone is league
 average; with it, each player plays at his talent blend for that week.
 
+Calibration harness (`npl_sim/calibration/`, Milestone 8): `npl-sim
+calibrate` and `tests/test_calibration.py` check that box scores add up,
+that the league run environment lands inside the targets in
+`config/calibration.yaml` (a placeholder band now; the 2025 and 2026 MLB
+seasons within 3% for the replay), that known-talent archetypes (three true
+outcomes, slap, power, speed) play back their cards, that K% spreads the way
+binomial noise says and shrinks with sample size, and that the engine's
+results haven't drifted from `tests/baselines/engine.json` (Jensen-Shannon
+divergence on the PA result mix, Wasserstein distance on runs per game).
+After an intended engine change, run `npl-sim calibrate --save-baseline`
+and commit the new baseline with it.
+
 Weekly talent blend (`npl_sim/talent/`, Milestone 7): each player's ability
 for a sim week, built from Statcast pitches in three layers, each an index
 against the league for the same handedness matchup. Baseline weights this

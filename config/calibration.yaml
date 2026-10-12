@@ -1,0 +1,23 @@
+# Run-environment targets for the calibration harness (src/npl_sim/calibration).
+# Each stat is either {target, tol} (tol = fraction of target) or {lo, hi}.
+targets:
+  # The placeholder league environment (engine/defaults.py) with
+  # league-average teams: a sanity band until Milestone 8's replay.
+  placeholder:
+    r_per_g: {lo: 4.0, hi: 5.0}
+    k_pct: {lo: 0.20, hi: 0.24}
+    bb_pct: {lo: 0.075, hi: 0.095}
+    hr_pct: {lo: 0.025, hi: 0.037}
+    avg: {lo: 0.235, hi: 0.265}
+    obp: {lo: 0.305, hi: 0.335}
+    slg: {lo: 0.385, hi: 0.435}
+  # Real seasons from the pipeline's backfill (Dave's machine, 2026-10-12).
+  # The spec's success test: a replayed season lands within ~3%.
+  mlb_2025:
+    r_per_g: {target: 4.45, tol: 0.03}
+    k_pct: {target: 0.222, tol: 0.03}
+    bb_pct: {target: 0.084, tol: 0.03}
+  mlb_2026:
+    r_per_g: {target: 4.48, tol: 0.03}
+    k_pct: {target: 0.221, tol: 0.03}
+    bb_pct: {target: 0.089, tol: 0.03}
