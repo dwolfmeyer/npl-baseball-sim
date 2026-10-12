@@ -190,15 +190,13 @@ def create_app(
             if not result.ok:
                 raise HTTPException(400, f"{team}'s lineup card has errors: {result.errors[0]}")
             cards[side] = card
-        # Who throws the first pitch (an opener when the plan has one) sets the
-        # other team's batting order.
-        starters, first = {}, {}
+        # The listed starter (or opener) sets the other team's batting order.
+        starters = {}
         for side, team in (("away", away), ("home", home)):
             by_id = {p.mlb_id: p for p in rosters[team]}
             slots = [(i, pid) for i, pid in enumerate(cards[side].rotation) if pid is not None]
-            i, pid = slots[slot[side] % len(slots)]
+            _, pid = slots[slot[side] % len(slots)]
             starters[side] = by_id[pid]
-            first[side] = by_id.get(cards[side].plan(i).opener) or by_id[pid]
         teams = {
             side: lineup.team_card(
                 team,
@@ -206,7 +204,7 @@ def create_app(
                 cards[side],
                 rosters[team],
                 slot[side],
-                (first["home" if side == "away" else "away"].throws or "R"),
+                (starters["home" if side == "away" else "away"].throws or "R"),
                 elig,
             )
             for side, team in (("away", away), ("home", home))
@@ -218,11 +216,7 @@ def create_app(
                 "away": away,
                 "home": home,
                 "seed": seed,
-                "starters": {
-                    s: starters[s].name
-                    + (f" (opener {first[s].name})" if first[s] is not starters[s] else "")
-                    for s in starters
-                },
+                "starters": {s: starters[s].name for s in starters},
                 "runs": {"away": box.runs[away], "home": box.runs[home]},
                 "events": events,
             }

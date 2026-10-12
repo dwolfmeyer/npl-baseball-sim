@@ -63,11 +63,11 @@
 
 <section class="card">
   <h2>Rotation</h2>
-  <p class="muted small">Each starter goes until his pitch limit or his times-through-the-order hook. An opener pitches the first inning or so before the starter takes over; a piggyback follows the starter for bulk innings.</p>
+  <p class="muted small">Each starter goes until his pitch limit or the time through the order you pull him after. Check Opener to have the listed pitcher go an inning or so, then pick the piggyback who pitches the bulk innings after him (up to the pitch limit).</p>
   {% set rotation_ids = card.rotation | reject("none") | list %}
-  {% set planned = card.plans | map(attribute="opener") | list + card.plans | map(attribute="piggyback") | list %}
+  {% set planned = card.plans | map(attribute="piggyback") | reject("none") | list %}
   <div class="wrap"><table class="rotation">
-    <tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Hook</th><th>Opener</th><th>Piggyback</th></tr>
+    <tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Pull after</th><th>Opener</th><th>Piggyback</th></tr>
     {% for i in range(rotation_size) %}
     {% set pid = card.rotation[i] if i < card.rotation|length else None %}
     {% set plan = card.plan(i) %}
@@ -82,19 +82,16 @@
       <td><select id="sp_limit_{{ i + 1 }}" name="sp_limit_{{ i + 1 }}" aria-label="Pitch limit for starter {{ i + 1 }}">
         {% for n in pitch_limits %}<option {% if n == plan.pitch_limit %}selected{% endif %}>{{ n }}</option>{% endfor %}
       </select></td>
-      <td><select id="sp_tto_{{ i + 1 }}" name="sp_tto_{{ i + 1 }}" aria-label="Times through the order hook for starter {{ i + 1 }}">
+      <td><select id="sp_tto_{{ i + 1 }}" name="sp_tto_{{ i + 1 }}" aria-label="Pull starter {{ i + 1 }}">
         {% for n, text in tto_hooks.items() %}<option value="{{ n }}" {% if n == plan.tto_hook %}selected{% endif %}>{{ text }}</option>{% endfor %}
       </select></td>
-      {% for what in ("opener", "piggyback") %}
-      {% set chosen = plan[what] %}
-      {% set other = plan["piggyback" if what == "opener" else "opener"] %}
-      <td><select id="sp_{{ what }}_{{ i + 1 }}" name="sp_{{ what }}_{{ i + 1 }}" aria-label="{{ what|capitalize }} for starter {{ i + 1 }}">
+      <td><input type="checkbox" id="sp_opener_{{ i + 1 }}" name="sp_opener_{{ i + 1 }}" value="1" aria-label="Starter {{ i + 1 }} is an opener" {% if plan.opener %}checked{% endif %}></td>
+      <td><select id="sp_piggyback_{{ i + 1 }}" name="sp_piggyback_{{ i + 1 }}" aria-label="Piggyback for starter {{ i + 1 }}" {% if not plan.opener %}disabled title="Check Opener to add a piggyback"{% endif %}>
         <option value="">None</option>
-        {% for a in arms %}{% if (a.mlb_id in active and a.mlb_id not in rotation_ids and a.mlb_id != other) or a.mlb_id == chosen %}
-        <option value="{{ a.mlb_id }}" {% if a.mlb_id == chosen %}selected{% endif %}>{{ a.name }}</option>
+        {% for a in arms %}{% if (a.mlb_id in active and a.mlb_id not in rotation_ids and a.mlb_id not in planned) or a.mlb_id == plan.piggyback %}
+        <option value="{{ a.mlb_id }}" {% if a.mlb_id == plan.piggyback %}selected{% endif %}>{{ a.name }}</option>
         {% endif %}{% endfor %}
       </select></td>
-      {% endfor %}
     </tr>
     {% endfor %}
   </table></div>

@@ -31,9 +31,14 @@ ROLES = {"CL": "Closer", "SU": "Setup", "MR": "Middle", "LR": "Long"}
 ROLE_ORDER = ("LR", "MR", "SU", "CL")
 PITCH_LIMITS = range(60, 125, 5)
 DEFAULT_PITCH_LIMIT = 95
-TTO_HOOKS = {0: "No hook", 2: "Before 3rd time through", 3: "Before 4th time through"}
+# Pull the starter once he has faced the order this many times (0 = no limit).
+TTO_HOOKS = {
+    0: "No limit",
+    1: "After 1st time through",
+    2: "After 2nd time through",
+    3: "After 3rd time through",
+}
 OPENER_PITCHES = 25
-PIGGYBACK_PITCHES = 60
 DEFENSE_RULES = {
     "infield_in": "Infield in with a runner on 3rd and fewer than 2 outs, "
     "7th inning or later, tied or within a run",
@@ -69,9 +74,15 @@ def can_play(p: NplPlayer, position: str, elig: Eligibility | None = None) -> bo
 @dataclass
 class StarterPlan:
     pitch_limit: int = DEFAULT_PITCH_LIMIT
-    tto_hook: int = 0  # 0 = none; 2 = pull before the 3rd time through; 3 = before the 4th
-    opener: int | None = None  # a reliever who pitches the 1st, then the starter
-    piggyback: int | None = None  # a reliever who follows the starter for bulk innings
+    tto_hook: int = 0  # pull after this many times through the order; 0 = no limit
+    # An opener game: the listed pitcher goes an inning or so and the piggyback
+    # pitches the bulk innings after him (the piggyback only applies then).
+    opener: bool = False
+    piggyback: int | None = None
+
+    def __post_init__(self) -> None:
+        # Cards saved before the opener was a checkbox stored a pitcher id.
+        self.opener = bool(self.opener)
 
 
 @dataclass
@@ -150,8 +161,8 @@ class LineupCard:
             StarterPlan(
                 pitch_limit=pid(f"sp_limit_{i}") or DEFAULT_PITCH_LIMIT,
                 tto_hook=pid(f"sp_tto_{i}") or 0,
-                opener=pid(f"sp_opener_{i}"),
-                piggyback=pid(f"sp_piggyback_{i}"),
+                opener=bool(get(f"sp_opener_{i}")),
+                piggyback=pid(f"sp_piggyback_{i}") if get(f"sp_opener_{i}") else None,
             )
             for i in range(1, ROTATION_SIZE + 1)
         ]
@@ -247,17 +258,19 @@ def validate(card: LineupCard, roster: list[NplPlayer], elig: Eligibility | None
         plan = card.plan(slot)
         if plan.pitch_limit not in PITCH_LIMITS:
             check.errors.append(f"Starter {slot + 1}'s pitch limit must be 60 to 120.")
-        if plan.opener is not None and plan.opener == plan.piggyback:
-            check.errors.append(f"Starter {slot + 1} has the same opener and piggyback.")
-        for what, pid in (("opener", plan.opener), ("piggyback", plan.piggyback)):
-            if pid is None:
-                continue
-            if pid not in active or pid not in by_id or not is_pitcher(by_id[pid]):
-                check.errors.append(f"Starter {slot + 1}'s {what} must be an active pitcher.")
-            elif pid in starters:
-                check.errors.append(
-                    f"{name(pid)} is in the rotation, so he can't be starter {slot + 1}'s {what}."
-                )
+        pid = plan.piggyback
+        if plan.opener and pid is None:
+            check.warnings.append(
+                f"Starter {slot + 1} opens with no piggyback; the bullpen takes over after him."
+            )
+        if pid is None:
+            continue
+        if pid not in active or pid not in by_id or not is_pitcher(by_id[pid]):
+            check.errors.append(f"Starter {slot + 1}'s piggyback must be an active pitcher.")
+        elif pid in starters:
+            check.errors.append(
+                f"{name(pid)} is in the rotation, so he can't be starter {slot + 1}'s piggyback."
+            )
 
     starting = {pid for slots in card.orders.values() for pid, _ in slots if pid is not None}
     used_subs = [sub.player for sub in card.subs]
@@ -467,13 +480,14 @@ def team_card(
     slot, starter_id = slots[starter_slot % len(slots)]
     plan = card.plan(slot)
     starters = {pid for _, pid in slots}
-    starter = arm(starter_id, plan.pitch_limit)
-    # An opener takes the first inning or so; the starter follows, then the piggyback.
-    first = arm(plan.opener, OPENER_PITCHES) if plan.opener else starter
-    bulk = [starter] if plan.opener else []
-    if plan.piggyback:
-        bulk.append(arm(plan.piggyback, PIGGYBACK_PITCHES))
-    planned = {plan.opener, plan.piggyback}
+    # In an opener game the listed pitcher goes an inning or so and the piggyback
+    # takes the bulk innings, up to the slot's pitch limit.
+    if plan.opener:
+        first = arm(starter_id, OPENER_PITCHES)
+        bulk = [arm(plan.piggyback, plan.pitch_limit)] if plan.piggyback else []
+    else:
+        first, bulk = arm(starter_id, plan.pitch_limit), []
+    planned = {plan.piggyback} if plan.opener else set()
     pen_ids = sorted(
         (
             pid

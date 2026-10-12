@@ -82,7 +82,7 @@ def test_validate_catches_bad_cards():
         active=[p.mlb_id for p in r],  # 32 active
         orders={**card.orders, "rhp": rhp},
         rotation=card.rotation[:4],
-        plans=[StarterPlan(opener=card.rotation[1]), StarterPlan(pitch_limit=140)],
+        plans=[StarterPlan(opener=True, piggyback=card.rotation[1]), StarterPlan(pitch_limit=140)],
         roles={},
     )
     errors = " ".join(validate(bad, r, ELIG).errors)
@@ -92,7 +92,7 @@ def test_validate_catches_bad_cards():
     assert "two players at" in errors
     assert "4 of 5 starters" in errors
     assert "one closer" in errors
-    assert "so he can't be starter 1's opener" in errors
+    assert "so he can't be starter 1's piggyback" in errors
     assert "pitch limit must be 60 to 120" in errors
 
 
@@ -121,14 +121,19 @@ def test_opener_and_piggyback_plan():
     r = roster(DUCKS)
     card = default_card(r, ELIG)
     relievers = [pid for pid in card.roles]
-    opener, piggyback = relievers[-1], relievers[-2]
-    card.plans[1] = StarterPlan(pitch_limit=80, opener=opener, piggyback=piggyback)
+    piggyback = relievers[-1]
+    card.plans[1] = StarterPlan(pitch_limit=80, opener=True, piggyback=piggyback)
     assert validate(card, r, ELIG).ok
     tc = team_card(DUCKS, "DUC", card, r, 1, "R", ELIG)
-    assert tc.starter.id == str(opener) and tc.starter.pitch_limit == 25
-    assert [p.id for p in tc.bullpen[:2]] == [str(card.rotation[1]), str(piggyback)]
-    assert tc.bullpen[0].pitch_limit == 80
+    # The listed pitcher opens; the piggyback follows with the slot's pitch limit.
+    assert tc.starter.id == str(card.rotation[1]) and tc.starter.pitch_limit == 25
+    assert tc.bullpen[0].id == str(piggyback) and tc.bullpen[0].pitch_limit == 80
     assert len({p.id for p in tc.bullpen}) == len(tc.bullpen)  # nobody listed twice
+    # Without the opener box the piggyback doesn't apply.
+    card.plans[1] = StarterPlan(pitch_limit=80, piggyback=piggyback)
+    tc = team_card(DUCKS, "DUC", card, r, 1, "R", ELIG)
+    assert tc.starter.id == str(card.rotation[1]) and tc.starter.pitch_limit == 80
+    assert str(piggyback) in [p.id for p in tc.bullpen]  # he's just a reliever again
 
 
 @pytest.fixture
@@ -149,7 +154,7 @@ def form_for(card: LineupCard) -> dict:
         plan = card.plan(i - 1)
         data[f"sp_limit_{i}"] = str(plan.pitch_limit)
         data[f"sp_tto_{i}"] = str(plan.tto_hook)
-        data[f"sp_opener_{i}"] = str(plan.opener or "")
+        data[f"sp_opener_{i}"] = "1" if plan.opener else ""
         data[f"sp_piggyback_{i}"] = str(plan.piggyback or "")
     for i, sub in enumerate(card.subs, 1):
         data[f"sub_player_{i}"] = str(sub.player)
