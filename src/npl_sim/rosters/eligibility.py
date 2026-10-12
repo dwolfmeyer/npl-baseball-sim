@@ -121,6 +121,10 @@ def parse_people_fielding(raw: dict, seasons: Iterable[int]) -> dict[int, Player
             bats=person.get("batSide", {}).get("code"),
             throws=person.get("pitchHand", {}).get("code"),
         )
+        # Players traded mid-season get one split per team plus a combined
+        # split (numTeams > 1, no team). Use the combined one when present.
+        per_team: dict[tuple[int, str], int] = {}
+        combined: dict[tuple[int, str], int] = {}
         for block in person.get("stats", []):
             for split in block.get("splits", []):
                 season = int(split.get("season") or 0)
@@ -128,9 +132,13 @@ def parse_people_fielding(raw: dict, seasons: Iterable[int]) -> dict[int, Player
                 if season not in wanted or pos not in FIELD_POSITIONS:
                     continue
                 games = int(split.get("stat", {}).get("games") or 0)
-                by_pos = rec.games.setdefault(season, {})
-                # Players traded mid-season have one split per team.
-                by_pos[pos] = by_pos.get(pos, 0) + games
+                key = (season, pos)
+                if (split.get("numTeams") or 1) > 1:
+                    combined[key] = combined.get(key, 0) + games
+                else:
+                    per_team[key] = per_team.get(key, 0) + games
+        for (season, pos), games in (per_team | combined).items():
+            rec.games.setdefault(season, {})[pos] = games
         out[int(person["id"])] = rec
     return out
 
