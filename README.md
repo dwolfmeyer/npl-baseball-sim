@@ -62,7 +62,14 @@ fielding and pitching notes, and a play log by half inning that filters to
 all plays or scoring plays. Each PA combines batter and pitcher with
 multinomial log5 against the league rate for that handedness matchup, then
 applies fatigue, catcher framing, park (the only place park factors enter)
-and defense/alignment once each.
+and defense/alignment once each. Teams play straight up unless the owner
+ticks alignment rules (`engine/alignment.py`): infield in with a runner on
+third, double-play depth conceding the run, guard the lines or no doubles,
+each optionally limited by inning and score.
+
+Position eligibility (`npl_sim/eligibility.py`): 20 MLB games at a position
+last season or 10 this season, counted from box scores; players with no
+qualifying games yet fall back to their listed NPL position. Anyone can DH.
 
 ```sh
 npl-sim demo-game --seed 3 --plays scoring   # two league-average teams
