@@ -10,6 +10,7 @@ from npl_sim.rosters.sources import players_from_dump
 from npl_sim.web.app import create_app
 from npl_sim.web.lineup import (
     ACTIVE_LIMIT,
+    POSITIONS,
     DefensiveSub,
     LineupCard,
     StarterPlan,
@@ -91,7 +92,6 @@ def test_validate_catches_bad_cards():
     assert "bats twice" in errors
     assert "two players at" in errors
     assert "4 of 5 starters" in errors
-    assert "one closer" in errors
     assert "so he can't be starter 1's piggyback" in errors
     assert "pitch limit must be 60 to 120" in errors
 
@@ -325,3 +325,16 @@ def test_autofill_route(client):
         "/teams/midwest-ducksnorts/lineup/autofill", data=data, headers={"HX-Request": "true"}
     )
     assert resp.status_code == 200 and "<html" not in resp.text and "card is legal" in resp.text
+
+
+def test_any_player_any_position_and_no_closer_needed(client):
+    # Every position dropdown offers every position; ineligible ones are marked.
+    page = client.get("/teams/midwest-ducksnorts/lineup").text
+    pos_selects = [s.split("</select>")[0] for s in page.split("<select") if 'name="rhp_pos_' in s]
+    assert pos_selects and all(s.count("<option") == len(POSITIONS) for s in pos_selects)
+    assert "out of pos" in page
+
+    card = default_card(roster(DUCKS), ELIG)
+    card.roles = {pid: ("MR" if role == "CL" else role) for pid, role in card.roles.items()}
+    check = validate(card, roster(DUCKS), ELIG)
+    assert check.ok, check.errors

@@ -300,8 +300,9 @@ def validate(card: LineupCard, roster: list[NplPlayer], elig: Eligibility | None
 
     relievers = [pid for pid in card.roles if pid in active and pid not in starters]
     closers = [pid for pid in relievers if card.roles[pid] == "CL"]
-    if len(closers) != 1:
-        check.errors.append(f"Name one closer ({len(closers)} set).")
+    if len(closers) > 1:
+        # Not required, but two closers just pitch the 9th in role order.
+        check.warnings.append(f"{len(closers)} relievers are set as closer.")
     if len(relievers) < 5:
         check.warnings.append(f"Only {len(relievers)} relievers have a bullpen role.")
     return check
