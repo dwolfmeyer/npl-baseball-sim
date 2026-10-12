@@ -9,6 +9,16 @@ from npl_sim.engine.detail import POSITION_TITLE
 from npl_sim.engine.names import BASE_NAME, NEXT_BASE, Roster, ordinal
 
 BALL_TYPE = {"GB": "ground ball", "LD": "line drive", "FB": "fly ball", "PU": "pop up"}
+FIELD_NAME = {
+    "C": "catcher",
+    "1B": "first base",
+    "2B": "second base",
+    "3B": "third base",
+    "SS": "shortstop",
+    "LF": "left field",
+    "CF": "center field",
+    "RF": "right field",
+}
 HIT_VERB = {"1B": "singles", "2B": "doubles", "3B": "triples"}
 OUT_VERB = {"FO": "flies out", "LO": "lines out", "PO": "pops out"}
 
@@ -16,7 +26,7 @@ OUT_VERB = {"FO": "flies out", "LO": "lines out", "PO": "pops out"}
 @dataclass
 class Play:
     description: str
-    kind: str  # pa, stolen_base, caught_stealing, pitching_change, auto_runner
+    kind: str  # pa, stolen_base, caught_stealing, pitching_change, defensive_sub, auto_runner
     batter: str | None = None
     pitcher: str | None = None
     count: str | None = None  # "1-2" on the final pitch of a plate appearance
@@ -126,6 +136,25 @@ def game_log(events: list[dict]) -> GameLog:
                 pitcher=e["into"],
                 outs=e["outs"],
             )
+        elif e["type"] == "defensive_sub":
+            side = roster.side_of(e["team"])
+            team = roster.teams[side]
+            out_pos = next((p for p, pid in team.positions.items() if pid == e["out"]), None)
+            replaced = f"{POSITION_TITLE[out_pos]} " if out_pos in POSITION_TITLE else ""
+            desc = (
+                f"Defensive Substitution: {full[e['into']]} replaces {replaced}{full[e['out']]}, "
+                f"batting {ordinal(e['slot'] + 1)}, playing {FIELD_NAME[e['position']]}."
+            )
+            if e.get("moved"):
+                m = e["moved"]
+                was = next((p for p, pid in team.positions.items() if pid == m["player"]), None)
+                if was in FIELD_NAME and m["position"] in FIELD_NAME:
+                    desc += (
+                        f" Defensive switch from {FIELD_NAME[was]} to "
+                        f"{FIELD_NAME[m['position']]} for {full[m['player']]}."
+                    )
+            team.substitute(e)
+            play = Play(desc, e["type"], outs=0)
         elif e["type"] == "auto_runner":
             play = Play(f"Runner placed on 2nd: {full[e['runner']]}.", e["type"])
         elif e["type"] == "half_end":

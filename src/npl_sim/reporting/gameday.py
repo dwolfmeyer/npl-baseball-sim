@@ -22,6 +22,7 @@ h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 16px}
 table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
 th,td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
 th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-weight:600;font-size:12px}
+td.sub{padding-left:20px}
 .wrap{overflow-x:auto}.line td.big{font-weight:700}.line td:first-child{width:28%;font-weight:600}
 .tabs{display:flex;gap:4px;margin:20px 0 12px;border-bottom:1px solid var(--line)}
 .tabs button,.filter button{background:none;border:0;color:var(--muted);font:inherit;
@@ -84,7 +85,8 @@ def _batting(box: BoxScore, team: str) -> str:
     for b in box.batting[team].values():
         cells = "".join(f"<td>{getattr(b, c)}</td>" for c in cols)
         rows.append(
-            f"<tr><td>{escape(b.name)} <small>{escape(b.position)}</small></td>{cells}</tr>"
+            f"<tr><td{' class=sub' if b.substitute else ''}>{escape(b.name)} "
+            f"<small>{escape(b.position)}</small></td>{cells}</tr>"
         )
         for c in cols:
             totals[c] += getattr(b, c)
