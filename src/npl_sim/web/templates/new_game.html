@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Sim a game{% endblock %}
+{% block content %}
+<h1>Sim a game</h1>
+<p class="sub">Uses each team's saved lineup card (or its default card). Every player sims at league-average rates until the weekly MLB cards are wired in.</p>
+<form method="post" action="/games" class="card">
+  <div class="form-row">
+    <label>Away<select name="away">{% for t in teams %}<option {% if t == away %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+    <label>Rotation spot<select name="away_slot">{% for i in range(1, rotation_size + 1) %}<option>{{ i }}</option>{% endfor %}</select></label>
+  </div>
+  <div class="form-row">
+    <label>Home<select name="home">{% for t in teams %}<option {% if t == home %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+    <label>Rotation spot<select name="home_slot">{% for i in range(1, rotation_size + 1) %}<option>{{ i }}</option>{% endfor %}</select></label>
+  </div>
+  <div class="form-row">
+    <label>Seed (blank for random)<input type="number" name="seed" min="1" placeholder="random"></label>
+    <button class="btn" type="submit">Play ball</button>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>NPL {{ 2026 }}</h1>
+<p class="sub">Set a team's weekly lineup card, then sim a game to see how it plays.</p>
+<div class="grid2">
+<section>
+<h2>Teams</h2>
+<div class="wrap"><table>
+<tr><th>Team</th><th>Division</th><th>Active MLB</th><th>Lineup card</th></tr>
+{% for t in teams %}
+<tr>
+<td>{% if t.players %}<a href="/teams/{{ t.slug }}/lineup">{{ t.slot.team }}</a>{% else %}<span class="muted">{{ t.slot.team }}</span>{% endif %}</td>
+<td class="muted">{{ t.slot.league }} {{ t.slot.division }}</td>
+<td>{{ t.players or "–" }}</td>
+<td>{% if t.saved_at %}saved{% elif t.players %}<span class="muted">default</span>{% else %}<span class="muted">no roster</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</table></div>
+</section>
+<section>
+<h2>Recent games</h2>
+{% if games %}
+<div class="wrap"><table>
+<tr><th>Game</th><th>Final</th><th>Seed</th></tr>
+{% for g in games %}
+<tr><td><a href="/games/{{ g.id }}">{{ g.away }} at {{ g.home }}</a></td>
+<td>{{ g.runs.away }}–{{ g.runs.home }}</td><td class="muted">{{ g.seed }}</td></tr>
+{% endfor %}
+</table></div>
+{% else %}
+<p class="muted">No games yet. <a href="/games/new">Sim one</a>.</p>
+{% endif %}
+</section>
+</div>
+{% endblock %}

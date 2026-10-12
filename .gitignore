@@ -11,3 +11,4 @@ data/snapshots/
 data/clean/
 *.parquet
 .env
+data/web/

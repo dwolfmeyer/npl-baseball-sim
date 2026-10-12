@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ box.away }} {{ box.runs[box.away] }}, {{ box.home }} {{ box.runs[box.home] }}{% endblock %}
+{% block content %}
+<h1>{{ box.away }} {{ box.runs[box.away] }}, {{ box.home }} {{ box.runs[box.home] }}</h1>
+<p class="sub">Final{% if box.line[box.away]|length > 9 %}/{{ box.line[box.away]|length }}{% endif %} · Starters: {{ game.starters.away }} vs {{ game.starters.home }} · Seed {{ game.seed }} ·
+<a href="/games/new">Sim another</a></p>
+{{ body | safe }}
+{% endblock %}
+{% block scripts %}<script>{{ gameday_js | safe }}</script>{% endblock %}

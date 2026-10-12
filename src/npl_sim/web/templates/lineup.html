@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ team }} lineup card{% endblock %}
+{% block content %}
+<h1>{{ team }}</h1>
+<p class="sub">Weekly lineup card. Changes are checked as you go; save when the card is legal.</p>
+{% if saved %}<div class="banner">Lineup card saved.</div>{% endif %}
+{% include "partials/card.html" %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Re-check the card on every change: the server returns the re-rendered form
+// with its problems listed, and it replaces this one in place.
+document.addEventListener('change', async (ev) => {
+  const form = ev.target.closest('form[data-check]');
+  if (!form) return;
+  const focused = ev.target.name, value = ev.target.value;
+  const resp = await fetch(form.dataset.check, {
+    method: 'POST', body: new URLSearchParams(new FormData(form)), headers: {'HX-Request': 'true'},
+  });
+  if (!resp.ok) return;
+  form.outerHTML = await resp.text();
+  const again = [...document.querySelectorAll(`form[data-check] [name="${focused}"]`)]
+    .find((el) => el.type !== 'checkbox' || el.value === value);
+  if (again) again.focus();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,91 @@
+<form id="card" method="post" action="/teams/{{ team_slug }}/lineup"
+      data-check="/teams/{{ team_slug }}/lineup/check">
+
+<div class="status">
+  <div>
+    <div><span class="count">{{ active|length }}/{{ active_limit }}</span> active
+    {% if check.ok %}<span class="ok"> · card is legal</span>{% else %}<span class="err"> · {{ check.errors|length }} problem{{ "s" if check.errors|length != 1 }}</span>{% endif %}
+    {% if saved_at %}<span class="muted small"> · last saved {{ saved_at }}</span>{% endif %}</div>
+    {% if check.errors or check.warnings %}
+    <ul>
+      {% for e in check.errors %}<li class="err">{{ e }}</li>{% endfor %}
+      {% for w in check.warnings %}<li class="warn">{{ w }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  <button class="btn" type="submit" {% if not check.ok %}disabled style="opacity:.5;cursor:not-allowed"{% endif %}>Save lineup card</button>
+</div>
+
+<div class="grid2">
+{% for side, label in sides.items() %}
+<section class="card">
+  <h2>Batting order {{ label }}</h2>
+  <table class="order">
+  {% for pid, pos in card.orders.get(side, []) %}
+  {% set i = loop.index %}
+  <tr>
+    <td>{{ i }}</td>
+    <td><select name="{{ side }}_player_{{ i }}" aria-label="Batter {{ i }} {{ label }}">
+      <option value="">—</option>
+      {% for h in hitters %}{% if h.mlb_id in active or h.mlb_id == pid %}
+      <option value="{{ h.mlb_id }}" {% if h.mlb_id == pid %}selected{% endif %}>{{ h.name }} ({{ h.position }})</option>
+      {% endif %}{% endfor %}
+    </select></td>
+    <td><select name="{{ side }}_pos_{{ i }}" aria-label="Position {{ i }} {{ label }}">
+      {% for p in positions %}<option {% if p == pos %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select></td>
+  </tr>
+  {% endfor %}
+  </table>
+</section>
+{% endfor %}
+</div>
+
+<div class="grid2">
+<section class="card">
+  <h2>Rotation</h2>
+  <table class="order">
+  {% for i in range(rotation_size) %}
+  {% set pid = card.rotation[i] if i < card.rotation|length else None %}
+  <tr><td>{{ i + 1 }}</td><td><select name="sp_{{ i + 1 }}" aria-label="Starter {{ i + 1 }}">
+    <option value="">—</option>
+    {% for a in arms %}{% if a.mlb_id in active or a.mlb_id == pid %}
+    <option value="{{ a.mlb_id }}" {% if a.mlb_id == pid %}selected{% endif %}>{{ a.name }} ({{ a.position }})</option>
+    {% endif %}{% endfor %}
+  </select></td></tr>
+  {% endfor %}
+  </table>
+</section>
+<section class="card">
+  <h2>Bullpen</h2>
+  <p class="muted small">Relievers enter long, middle, setup, then closer when the starter tires. Leverage-based use comes with the engine's bullpen logic.</p>
+  <table class="order">
+  {% for a in arms %}{% if a.mlb_id in active and a.mlb_id not in rotation %}
+  <tr><td></td><td>{{ a.name }} <span class="muted small">{{ a.position }}</span></td>
+  <td><select name="role_{{ a.mlb_id }}" aria-label="Role for {{ a.name }}">
+    <option value="">—</option>
+    {% for code, name in roles.items() %}<option value="{{ code }}" {% if card.roles.get(a.mlb_id) == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
+  </select></td></tr>
+  {% endif %}{% endfor %}
+  </table>
+</section>
+</div>
+
+<section class="card">
+  <h2>Active roster</h2>
+  <p class="muted small">Up to {{ active_limit }} players. Only active players can bat, start or relieve.</p>
+  <div class="grid2">
+  {% for title, group in (("Hitters", hitters), ("Pitchers", arms)) %}
+  <div class="wrap"><table>
+    <tr><th>{{ title }}</th><th>Pos</th><th>MLB</th><th>Active</th></tr>
+    {% for p in group %}
+    <tr class="{{ '' if p.mlb_id in active else 'inactive' }}">
+      <td>{{ p.name }}</td><td>{{ p.position }}</td><td>{{ p.mlb_org or "" }}</td>
+      <td><input type="checkbox" name="active" value="{{ p.mlb_id }}" aria-label="Active: {{ p.name }}" {% if p.mlb_id in active %}checked{% endif %}></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endfor %}
+  </div>
+</section>
+</form>
