@@ -229,8 +229,8 @@ def blend(
                 index=idx,
                 layers={
                     "baseline": _mean_hands(b),
-                    "process": {s: p.get(s, 1.0) for s in STATS},
-                    "results": {s: r.get(s, 1.0) for s in STATS},
+                    "process": {s: float(p.get(s, 1.0)) for s in STATS},
+                    "results": {s: float(r.get(s, 1.0)) for s in STATS},
                 },
             )
     return out
@@ -398,11 +398,11 @@ def _results(week_rows, role, me, opp_hand, base, process, league_rate) -> dict:
 
 def _clamp(x: float) -> float:
     lo, hi = INDEX_RANGE
-    return min(hi, max(lo, x))
+    return float(min(hi, max(lo, x)))
 
 
 def _mean_hands(b: dict) -> dict[str, float]:
-    return {s: sum(b[h][s] for h in HANDS) / len(HANDS) for s in STATS}
+    return {s: float(sum(b[h][s] for h in HANDS) / len(HANDS)) for s in STATS}
 
 
 # --- Stuff+ --------------------------------------------------------------------
