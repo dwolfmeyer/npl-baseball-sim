@@ -1,6 +1,6 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`, `demo-game`, `demo-week`, `sim-week`, `web`, `eligibility`, and the
-MLB data pipeline (`pull-week`, `backfill`, `check-calendar`, `sync-mlb`)."""
+`generate-schedule`, `demo-game`, `demo-week`, `sim-week`, `calibrate`, `web`, `eligibility`,
+and the MLB data pipeline (`pull-week`, `backfill`, `check-calendar`, `sync-mlb`)."""
 
 from __future__ import annotations
 
@@ -67,6 +67,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "demo-week", help="sim a week between two average teams under the playing-time budget"
     )
     demo_week.add_argument("--seed", type=int, default=1)
+
+    cal = sub.add_parser(
+        "calibrate",
+        help="calibration harness: identities, run environment, archetypes, drift from baseline",
+    )
+    cal.add_argument("--games", type=int, default=1000)
+    cal.add_argument("--seed", type=int, default=0)
+    cal.add_argument(
+        "--targets", default="placeholder", help="target set in config/calibration.yaml"
+    )
+    cal.add_argument(
+        "--save-baseline",
+        action="store_true",
+        help="save these results as the engine baseline (after an intended engine change)",
+    )
 
     simw = sub.add_parser(
         "sim-week",
@@ -209,6 +224,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if m.unavailable:
                     notes.append("resting or used up: " + ", ".join(m.unavailable))
                 print(f"  {team}: " + "; ".join(notes))
+    elif args.cmd == "calibrate":
+        return _calibrate(args)
     elif args.cmd == "sim-week":
         return _sim_week(args)
     elif args.cmd == "eligibility":
@@ -228,6 +245,44 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.cmd in ("pull-week", "backfill", "check-calendar", "sync-mlb"):
         return _pipeline_command(args)
     return 0
+
+
+def _calibrate(args: argparse.Namespace) -> int:
+    from npl_sim.calibration import harness as h
+
+    games = h.average_games(args.games, args.seed)
+    stats = h.summary(games)
+    print(f"{args.games} games between league-average teams (seed {args.seed})\n")
+    print("Run environment vs", args.targets)
+    checks = h.check_targets(stats, h.load_targets(args.targets))
+    for c in checks:
+        print(f"  {c.stat:<8} {c.value:7.3f}   [{c.lo:.3f}, {c.hi:.3f}]  {'ok' if c.ok else 'OFF'}")
+    bad = h.identities(games)
+    print(f"\nAccounting identities: {'all add up' if not bad else f'{len(bad)} broken'}")
+    for msg in bad[:10]:
+        print("  " + msg)
+    print("\nArchetypes (sim vs card, per PA)")
+    for kind, r in h.archetype_report().items():
+        sim, exp = r["sim"], r["expected"]
+        cells = "  ".join(f"{k} {sim[k]:.3f}/{exp[k]:.3f}" for k in ("K", "BB", "HR"))
+        print(f"  {kind:<20} {cells}  TTO {sim['tto']:.3f}")
+    sd50, bin50 = h.k_spread(games, 50)
+    sd200, bin200 = h.k_spread(games, 200)
+    print(
+        f"\nK% spread: 50 PA {sd50:.3f} (binomial {bin50:.3f}), 200 PA {sd200:.3f} ({bin200:.3f})"
+    )
+    fp = h.fingerprint(games)
+    if args.save_baseline:
+        print(f"\nSaved baseline to {h.save_baseline(fp)}")
+        return 0
+    if h.BASELINE.exists():
+        d = h.drift(h.load_baseline(), fp)
+        flags = {k: "ok" if d[k] <= h.DRIFT_LIMITS[k] else "SHIFTED" for k in d}
+        print(
+            f"\nDrift from baseline: event mix JSD {d['jsd']:.5f} ({flags['jsd']}), "
+            f"runs/game Wasserstein {d['wasserstein']:.3f} ({flags['wasserstein']})"
+        )
+    return 0 if not bad and all(c.ok for c in checks) else 1
 
 
 def _sim_week(args: argparse.Namespace) -> int:
