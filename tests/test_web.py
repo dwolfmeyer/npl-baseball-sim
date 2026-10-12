@@ -24,7 +24,7 @@ from npl_sim.web.lineup import (
 from npl_sim.web.store import Store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "npl_2026_test_teams.json"
-DUCKS, MCFLYS = "Midwest Ducksnorts", "Hill Valley McFlys"
+DUCKS, MCFLYS, ROPES = "Midwest Ducksnorts", "Hill Valley McFlys", "Frozen Ropes"
 PLAYERS = players_from_dump(FIXTURE)
 HENDERSON, SANOJA, TROUT, GOODMAN, MATTHEWS = 683002, 691594, 545361, 696100, 694728
 # Made-up games by position for a few players; the rest fall back to roster positions.
@@ -45,7 +45,7 @@ def roster(team: str):
     return [p for p in PLAYERS if p.team == team and p.is_active_mlb and p.mlb_id]
 
 
-@pytest.mark.parametrize("team", [DUCKS, MCFLYS])
+@pytest.mark.parametrize("team", [DUCKS, MCFLYS, ROPES])
 def test_default_card_is_legal(team):
     card = default_card(roster(team), ELIG)
     check = validate(card, roster(team), ELIG)
