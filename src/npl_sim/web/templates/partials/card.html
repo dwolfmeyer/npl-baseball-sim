@@ -196,7 +196,7 @@
 
 <section class="card">
   <h2>Hitting and fielding</h2>
-  <p class="muted small">{{ stats_source }} AVG/OBP/SLG against each side, with plate appearances. Fielding grades are on the 20-80 scale (50 is average) at each position as the sim rates him there; his eligible positions are in bold, and elsewhere the grade includes the out-of-position cost.</p>
+  <p class="muted small">{{ stats_source }} AVG/OBP/SLG against each side, with plate appearances. Fielding grades are on the 20-80 scale (50 is average) at each position as the sim rates him there, from his range and framing in the talent blend when clean data is loaded (else 50 at his eligible spots); his eligible positions are in bold, and elsewhere the grade includes the out-of-position cost.</p>
   <div class="wrap"><table class="stats">
     <thead><tr><th>Hitter</th>{% for side, label in sides.items() %}<th>{{ label }}</th>{% endfor %}{% for p in positions if p != "DH" %}<th class="g">{{ p }}</th>{% endfor %}</tr></thead>
     <tbody>

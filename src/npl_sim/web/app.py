@@ -87,6 +87,13 @@ def create_app(
     by_slug = {slug(t): t for t in rosters}
     clean_root = clean_root or os.environ.get(stats.CLEAN_ROOT_ENV) or stats.DEFAULT_CLEAN_ROOT
     splits = stats.SplitsCache(clean_root, SEASON)
+    talents = stats.TalentCache(clean_root, SEASON)
+    hands = {
+        str(p.mlb_id): rec.bats
+        for r in rosters.values()
+        for p in r
+        if (rec := elig.players.get(p.mlb_id)) and rec.bats
+    }
 
     def team_for(team_slug: str) -> str:
         if team_slug not in by_slug or not rosters[by_slug[team_slug]]:
@@ -106,6 +113,7 @@ def create_app(
         arms = [p for p in roster if lineup.is_pitcher(p)]
         fields = {}
         lines = splits.get()
+        talent = talents.get(hands)
         for h in hitters:
             positions, from_games = lineup.fielding(h, elig)
             fields[h.mlb_id] = {
@@ -119,7 +127,7 @@ def create_app(
                 "from_games": from_games,
                 "games": elig.games_text(h.mlb_id),
                 "lines": {side: lines.line(h.mlb_id, side) for side in lineup.SIDES},
-                "grades": stats.grades(lineup.glove_positions(h, elig)),
+                "grades": stats.grades(lineup.glove_positions(h, elig), h.mlb_id, talent),
             }
         return TEMPLATES.TemplateResponse(
             request,
@@ -264,7 +272,15 @@ def create_app(
                 raise HTTPException(400, f"{team}'s lineup card has errors: {result.errors[0]}")
             cards[team] = card
         week_rosters = {t: rosters[t] for t in teams}
-        result = sim_week(cards, week_rosters, elig, round_robin(teams), None, seed)
+        talent = talents.get(hands)
+        ability = (
+            f"Ability: the talent blend for {SEASON} week {talents.week}."
+            if talent is not None
+            else f"Ability: league average (the talent blend didn't load: {talents.error})."
+            if talents.error
+            else "Ability: league average (no clean MLB data on this machine)."
+        )
+        result = sim_week(cards, week_rosters, elig, round_robin(teams), None, seed, talent=talent)
         game_ids = []
         for g in result.games:
             events = g["events"]
@@ -293,7 +309,7 @@ def create_app(
         page = render_week(
             result,
             "NPL test week",
-            f"Playing time: a typical week at each player's {SEASON} pace. Seed {seed}.",
+            f"Playing time: a typical week at each player's {SEASON} pace. {ability} Seed {seed}.",
             link=lambda i: f"/games/{game_ids[i]}",
             names=names,
         )

@@ -64,3 +64,41 @@ def test_card_shows_lines_and_grades(tmp_path):
     assert "2026 MLB stats, 1 week of clean data." in page
     assert "1.000/1.000/4.000" in page and ".000/.000/.000" in page
     assert DUCKS in page and "<b>50</b>" in page
+
+
+def test_grades_use_the_talent_blends_range_and_framing():
+    class Talent:
+        range = {str(HENDERSON): ("SS", 6.0)}
+        framing = {}
+
+    g = stats.grades({"SS": 0.0, "3B": 0.0}, HENDERSON, Talent())
+    assert g["SS"] == 60 and g["3B"] == 55  # half his range at his other spot
+    assert stats.grades({"SS": 0.0}, 1, Talent())["SS"] == 50
+
+
+def test_sim_week_says_whether_it_used_the_talent_blend(tmp_path, monkeypatch):
+    clean = tmp_path / "clean"
+    app = create_app(store=Store(tmp_path), players=PLAYERS, elig=ELIG, clean_root=clean)
+    client = TestClient(app)
+    page = client.post("/weeks", data={"seed": "3"}, follow_redirects=True).text
+    assert "Ability: league average" in page
+
+    seen = {}
+
+    def fake_load(root, season, week, hands=None):
+        seen.update(season=season, week=week, hands=hands)
+        return default_talent()
+
+    import npl_sim.talent.load as load
+
+    monkeypatch.setattr(load, "load_week_talent", fake_load)
+    write_week(clean, 2026, 3, [(HENDERSON, "R", "single")])
+    page = client.post("/weeks", data={"seed": "3"}, follow_redirects=True).text
+    assert "Ability: the talent blend for 2026 week 3." in page
+    assert seen["week"] == 3 and seen["hands"][str(HENDERSON)] == "L"
+
+
+def default_talent():
+    from npl_sim.talent.load import WeekTalent, default_league
+
+    return WeekTalent(default_league())

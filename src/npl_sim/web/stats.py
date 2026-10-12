@@ -10,12 +10,17 @@ if present, else the card shows none.
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
 from npl_sim.engine import fielding as glove
+from npl_sim.talent import fielding as tf
+
+log = logging.getLogger(__name__)
 
 CLEAN_ROOT_ENV = "NPL_CLEAN_ROOT"
 DEFAULT_CLEAN_ROOT = Path("data/clean")
@@ -139,6 +144,36 @@ class SplitsCache:
         return self._splits
 
 
+class TalentCache:
+    """The talent blend (talent.load.WeekTalent) for the latest week of clean
+    data this season, reloaded when the pipeline writes a new week; None
+    without clean data, and then players stay league average."""
+
+    def __init__(self, clean_root: Path | str, season: int):
+        self.root, self.season = Path(clean_root), season
+        self._key: tuple | None = None
+        self._talent = None
+        self.week: int | None = None
+        self.error: str | None = None
+
+    def get(self, hands: dict[str, str] | None = None):
+        files = _week_files(self.root / str(self.season))
+        key = tuple((str(f), f.stat().st_mtime_ns) for f in files)
+        if key != self._key:
+            self._key, self._talent, self.week, self.error = key, None, None, None
+            if files:
+                from npl_sim.talent.load import load_week_talent
+
+                week = int(re.sub(r"\D", "", files[-1].parent.name))
+                try:
+                    self._talent = load_week_talent(self.root, self.season, week, hands)
+                    self.week = week
+                except Exception as exc:  # a bad table mustn't take the card down
+                    self.error = f"{type(exc).__name__}: {exc}"
+                    log.warning("talent blend for %s week %s failed: %s", self.season, week, exc)
+        return self._talent
+
+
 def grade(runs: float) -> int:
     """A fielding rating in runs per 600 balls in play on the 20-80 scouting
     scale: average is 50 and each 2.5 runs is 5 points (one grade), so about
@@ -146,6 +181,12 @@ def grade(runs: float) -> int:
     return int(max(20, min(80, 50 + 5 * round(runs / 2.5))))
 
 
-def grades(positions: dict[str, float]) -> dict[str, int]:
-    """His grade at every fielding position, as the sim rates him there."""
+def grades(positions: dict[str, float], mlb_id=None, talent=None) -> dict[str, int]:
+    """His grade at every fielding position, as the sim rates him there: from
+    his range (and framing) in the talent blend when there is one."""
+    if talent is not None and mlb_id is not None:
+        pid = str(mlb_id)
+        rating, framing = talent.range.get(pid), talent.framing.get(pid)
+        if rating is not None or framing is not None:
+            positions = tf.positions(positions, rating, framing)
     return {p: grade(glove.rating_at(positions, p)) for p in glove.SPECTRUM if p != "DH"}
