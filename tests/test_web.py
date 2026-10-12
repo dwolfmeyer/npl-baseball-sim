@@ -24,7 +24,7 @@ from npl_sim.web.lineup import (
 from npl_sim.web.store import Store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "npl_2026_test_teams.json"
-DUCKS, MCFLYS = "Midwest Ducksnorts", "Hill Valley McFlys"
+DUCKS, MCFLYS, ROPES = "Midwest Ducksnorts", "Hill Valley McFlys", "Frozen Ropes"
 PLAYERS = players_from_dump(FIXTURE)
 HENDERSON, SANOJA, TROUT, GOODMAN, MATTHEWS = 683002, 691594, 545361, 696100, 694728
 # Made-up games by position for a few players; the rest fall back to roster positions.
@@ -45,7 +45,7 @@ def roster(team: str):
     return [p for p in PLAYERS if p.team == team and p.is_active_mlb and p.mlb_id]
 
 
-@pytest.mark.parametrize("team", [DUCKS, MCFLYS])
+@pytest.mark.parametrize("team", [DUCKS, MCFLYS, ROPES])
 def test_default_card_is_legal(team):
     card = default_card(roster(team), ELIG)
     check = validate(card, roster(team), ELIG)
@@ -156,6 +156,9 @@ def form_for(card: LineupCard) -> dict:
         plan = card.plan(i - 1)
         data[f"sp_limit_{i}"] = str(plan.pitch_limit)
         data[f"sp_tto_{i}"] = str(plan.tto_hook)
+        data[f"sp_runs_{i}"] = str(plan.max_runs or "off")
+        data[f"sp_li_{i}"] = str(plan.leverage or "off")
+        data[f"sp_li_inning_{i}"] = str(plan.leverage_from_inning)
         data[f"sp_opener_{i}"] = "1" if plan.opener else ""
         data[f"sp_piggyback_{i}"] = str(plan.piggyback or "")
     for i, sub in enumerate(card.subs, 1):
@@ -426,3 +429,38 @@ def test_reliever_usage_reaches_the_engine():
     assert (mop.role, mop.vs, mop.start_of_inning_only, mop.outs) == ("mopup", "L", True, 9)
     # A mop-up man has the pitches for three innings.
     assert next(p for p in tc.bullpen if p.id == str(middle)).pitch_limit == 54
+
+
+def test_starter_hooks_round_trip_and_reach_the_engine(client):
+    r = roster(DUCKS)
+    card = default_card(r, ELIG)
+    card.plans = [StarterPlan() for _ in card.rotation]
+    card.plans[0] = StarterPlan(tto_hook=2, max_runs=4, leverage=1.5, leverage_from_inning=6)
+    card.plans[1] = StarterPlan(max_runs=None, leverage=None)
+    form = {k: v if isinstance(v, list) else [v] for k, v in form_for(card).items()}
+    back = LineupCard.from_form(form)
+    assert back.plans[:2] == card.plans[:2]
+    assert LineupCard.from_json(card.to_json()).plans == card.plans
+
+    hook = team_card("Ducks", "MDK", card, r, 0, "R", ELIG).hook
+    assert (hook.times_through, hook.max_runs, hook.leverage, hook.leverage_from_inning) == (
+        2,
+        4,
+        1.5,
+        6,
+    )
+    off = team_card("Ducks", "MDK", card, r, 1, "R", ELIG).hook
+    assert off.max_runs is None and off.leverage is None
+    # Defaults: out after 6 runs, and in a spot of LI 2.0+ from the 7th.
+    default = team_card("Ducks", "MDK", card, r, 2, "R", ELIG).hook
+    assert (default.max_runs, default.leverage, default.leverage_from_inning) == (6, 2.0, 7)
+
+    html = client.post(
+        "/teams/midwest-ducksnorts/lineup/check",
+        data=form_for(card),
+        headers={"HX-Request": "true"},
+    ).text
+    runs = html.split('name="sp_runs_1"')[1].split("</select>")[0]
+    assert '<option value="4" selected>' in runs
+    li2 = html.split('id="sp_li_inning_2"')[1].split(">")[0]
+    assert "disabled" in li2  # no big-spot hook, so its inning is greyed out
