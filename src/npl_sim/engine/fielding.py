@@ -69,6 +69,9 @@ SHARE = {
     "LD": {"LF": 0.22, "CF": 0.25, "RF": 0.22, "SS": 0.09, "2B": 0.08, "3B": 0.08, "1B": 0.06},
     "FB": {"LF": 0.32, "CF": 0.38, "RF": 0.30},
 }
+# A catcher's runs per 600 BIP at C are his framing; +3 (elite) is 3% more
+# strikeouts and fewer walks.
+FRAMING_CAP = 0.05
 RUNS_PER_HIT_SAVED = 0.75  # a hit turned into an out, in runs
 LEAGUE_HIT_RATE = {"GB": 0.257, "LD": 0.662, "FB": 0.132}
 
@@ -121,7 +124,7 @@ def team_defense(base: Defense, lineup) -> Defense:
     """`base` adjusted for who plays where. `lineup` is [(hitter, position)];
     hitters carry `positions` (see the module docstring)."""
     runs = {pos: rating_at(getattr(h, "positions", {}), pos) for h, pos in lineup}
-    if not any(runs.values()):
+    if not any(runs.values()) and not any(getattr(h, "arm", 0.0) for h, _ in lineup):
         return base
     mult = dict(base.hit_mult)
     for bip, shares in SHARE.items():
@@ -129,9 +132,17 @@ def team_defense(base: Defense, lineup) -> Defense:
         delta = -hits / (RUNS_PER_HIT_SAVED * 600)  # change in hit probability per BIP
         mult[bip] = mult.get(bip, 1.0) * max(0.5, 1 + delta / LEAGUE_HIT_RATE[bip])
     catcher = runs.get("C", 0.0)
+    at = {pos: h for h, pos in lineup}
+    c = at.get("C")
+    # A real catcher's arm is his pop time; one out of position also can't throw.
+    c_arm = getattr(c, "arm", 0.0) if c else 0.0
+    if c is not None and out_of_position(getattr(c, "positions", {}), "C"):
+        c_arm += catcher / 15
+    outfield = [getattr(at[p], "arm", 0.0) for p in ("LF", "CF", "RF") if p in at]
     return replace(
         base,
         hit_mult=mult,
-        framing=base.framing + catcher / 1000,
-        catcher_arm=base.catcher_arm + catcher / 15,
+        framing=base.framing + max(-FRAMING_CAP, min(FRAMING_CAP, catcher / 100)),
+        catcher_arm=base.catcher_arm + c_arm,
+        of_arm=base.of_arm + (sum(outfield) / len(outfield) if outfield else 0.0),
     )

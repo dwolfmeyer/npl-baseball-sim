@@ -54,7 +54,7 @@ HARD_HIT_MPH = 95.0
 FASTBALLS = {"FF", "SI", "FA"}
 
 PA_COLUMNS = [
-    "game_date", "batter", "pitcher", "stand", "p_throws", "outcome", "bip",
+    "game_date", "batter", "pitcher", "stand", "p_throws", "home_team", "outcome", "bip",
     "xba", "barrel", "hard",
 ]  # fmt: skip
 
@@ -77,6 +77,8 @@ def plate_appearances(pitches: pd.DataFrame) -> pd.DataFrame:
     pa["hard"] = (speed >= HARD_HIT_MPH).astype(float).where(contact & speed.notna())
     for hand in ("stand", "p_throws"):
         pa[hand] = pa[hand].astype(str)
+    if "home_team" not in pa:
+        pa["home_team"] = None
     return pa[PA_COLUMNS].reset_index(drop=True)
 
 

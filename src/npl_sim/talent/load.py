@@ -14,13 +14,14 @@ import pandas as pd
 from npl_sim.engine.game import Hitter, Pitcher, TeamCard
 from npl_sim.engine.workload import WeekTeam
 from npl_sim.talent import blend as tb
+from npl_sim.talent import fielding as tf
 from npl_sim.talent.env import League, default_league, league
 from npl_sim.talent.events import pitch_flags, plate_appearances
 
 READ_COLUMNS = [
     "game_date", "batter", "pitcher", "stand", "p_throws", "events", "bb_type", "description",
     "zone", "launch_speed", "launch_speed_angle", "estimated_ba_using_speedangle",
-    "pitch_type", "release_speed",
+    "pitch_type", "release_speed", "home_team", *(f"fielder_{n}" for n in range(2, 10)),
 ]  # fmt: skip
 PRIOR_SEASONS = 2
 # FanGraphs' per-pitch Stuff+ columns (sp_s_CH, _CU, _FC, _FF, _FO, _FS, _KC,
@@ -37,12 +38,26 @@ class WeekTalent:
     league: League
     players: dict[str, tb.Talent] = field(default_factory=dict)
     speed: dict[str, float] = field(default_factory=dict)
+    # Fielding (talent/fielding.py): primary-position range rating, catcher
+    # framing (runs per 600 BIP) and arm by player id.
+    range: dict[str, tuple[str, float]] = field(default_factory=dict)
+    framing: dict[str, float] = field(default_factory=dict)
+    arm: dict[str, float] = field(default_factory=dict)
 
     def hitter(self, h: Hitter) -> Hitter:
         if h.id.startswith("AAA-"):
             return h
         card = tb.hitter_card(h, self.players.get(f"batter:{h.id}"), self.league)
-        return replace(card, speed=self.speed.get(h.id, h.speed))
+        rating, framing = self.range.get(h.id), self.framing.get(h.id)
+        gloves = h.positions
+        if gloves or rating is not None or framing is not None:
+            gloves = tf.positions(h.positions, rating, framing)
+        return replace(
+            card,
+            speed=self.speed.get(h.id, h.speed),
+            positions=gloves,
+            arm=self.arm.get(h.id, h.arm),
+        )
 
     def pitcher(self, p: Pitcher) -> Pitcher:
         if p.id.startswith("AAA-"):
@@ -100,8 +115,34 @@ def load_week_talent(clean_root: Path, season: int, week: int, hands=None) -> We
         frames = [read_pitches(p) for p in _weeks(root / str(season - back))]
         if frames:
             prior.append((back, pd.concat(frames, ignore_index=True)))
-    stuff_board, sprint_board = _boards(this, _last_day(week_pitches))
-    return build_week_talent(week_pitches, to_date, prior, stuff_board, sprint_board, hands)
+    boards = _boards(this, _last_day(week_pitches))
+    last_boards = _boards(root / str(season - 1), None)
+    talent = build_week_talent(
+        week_pitches,
+        to_date,
+        prior,
+        boards.get("fg_pitching"),
+        boards.get("sprint_speed"),
+        hands,
+        parks=tf.park_factors(boards.get("park_factors")),
+    )
+    season_pitches = pd.concat([to_date, week_pitches], ignore_index=True)
+    last = next((p for back, p in prior if back == 1), None)
+    add_fielding(talent, boards, season_pitches, last_boards, last)
+    return talent
+
+
+def add_fielding(talent, boards: dict, pitches, last_boards: dict, last_pitches) -> None:
+    """Range, framing and arms from this season's and last season's boards."""
+    on_field = tf.bip_on_field(pitches)
+    last_field = tf.bip_on_field(last_pitches) if last_pitches is not None else on_field.iloc[0:0]
+    talent.range = tf.range_ratings(
+        [(0, boards.get("oaa"), on_field), (1, last_boards.get("oaa"), last_field)]
+    )
+    talent.framing = tf.framing_ratings(
+        [(0, boards.get("framing"), on_field), (1, last_boards.get("framing"), last_field)]
+    )
+    talent.arm = tf.arms(boards.get("arm_strength"), boards.get("poptime"))
 
 
 def build_week_talent(
@@ -111,18 +152,20 @@ def build_week_talent(
     stuff_board: pd.DataFrame | None = None,
     sprint_board: pd.DataFrame | None = None,
     hands: dict[str, str] | None = None,
+    parks: dict | None = None,
 ) -> WeekTalent:
     """The blend from pitch tables: the sim week's, this season's before it,
-    and [(seasons back, pitches)] for prior seasons."""
+    and [(seasons back, pitches)] for prior seasons. `parks` (fielding.park_factors)
+    neutralizes every season's record for the parks it was played in."""
     week_pa = plate_appearances(week_pitches)
     to_date_pa = plate_appearances(to_date)
     prior_pa = [(back, plate_appearances(p), p) for back, p in prior]
     last = next((pa for back, pa, _ in prior_pa if back == 1), None)
     current = league(pd.concat([to_date_pa, week_pa], ignore_index=True), prior=last)
-    seasons = [tb.Season(0, to_date_pa, current, pitch_flags(to_date))]
+    seasons = [tb.Season(0, to_date_pa, current, pitch_flags(to_date), parks)]
     for back, pa, pitches in prior_pa:
-        seasons.append(tb.Season(back, pa, league(pa), pitch_flags(pitches)))
-    week = tb.Season(0, week_pa, current, pitch_flags(week_pitches))
+        seasons.append(tb.Season(back, pa, league(pa), pitch_flags(pitches), parks))
+    week = tb.Season(0, week_pa, current, pitch_flags(week_pitches), parks)
     season_pitches = pd.concat([to_date, week_pitches], ignore_index=True)
     stuff = stuff_by_pitcher(stuff_board, season_pitches) if stuff_board is not None else {}
     players = tb.blend(seasons, week, stuff=stuff, players=hands)
@@ -168,21 +211,20 @@ def sprint_speed(board: pd.DataFrame) -> dict[str, float]:
     return out
 
 
-def _boards(season_dir: Path, through: date | None):
+BOARDS = ("fg_pitching", "sprint_speed", "oaa", "framing", "poptime", "arm_strength",
+          "park_factors")  # fmt: skip
+
+
+def _boards(season_dir: Path, through: date | None) -> dict[str, pd.DataFrame]:
     """The latest as-of leaderboards on or before `through` (else the latest)."""
     dirs = sorted(season_dir.glob("asof-*"))
     if through is not None:
         on_time = [d for d in dirs if d.name.removeprefix("asof-") <= through.isoformat()]
         dirs = on_time or dirs
     if not dirs:
-        return None, None
+        return {}
     d = dirs[-1]
-
-    def read(name):
-        p = d / f"{name}.parquet"
-        return pd.read_parquet(p) if p.exists() else None
-
-    return read("fg_pitching"), read("sprint_speed")
+    return {n: pd.read_parquet(d / f"{n}.parquet") for n in BOARDS if (d / f"{n}.parquet").exists()}
 
 
 def _last_day(pitches: pd.DataFrame) -> date | None:

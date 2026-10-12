@@ -107,14 +107,16 @@ class Season:
     pa: pd.DataFrame
     league: League
     flags: pd.DataFrame | None = None
+    parks: dict | None = None  # (home team, batter side) -> factors, fielding.park_factors
 
 
 # --- observed and expected counts ------------------------------------------
 
 
-def annotate(pa: pd.DataFrame, league: League) -> pd.DataFrame:
+def annotate(pa: pd.DataFrame, league: League, parks: dict | None = None) -> pd.DataFrame:
     """Adds o_<stat> (what happened) and e_<stat> (what a league-average
-    player would expect in the same PA) for every stat, plus opportunity
+    player would expect in the same PA, in that park when `parks` maps
+    (home team, batter side) to factors) for every stat, plus opportunity
     columns n_pa and n_bip."""
     out = pa.copy()
     key = list(zip(out["stand"], out["p_throws"], strict=True))
@@ -134,7 +136,26 @@ def annotate(pa: pd.DataFrame, league: League) -> pd.DataFrame:
     out["e_HIT"] = out["bip"].map(hit).fillna(0.0)
     out["o_XBH"] = (out["outcome"].isin(("2B", "3B")) & bip).astype(float)
     out["e_XBH"] = out["bip"].map(xbh).fillna(0.0)
+    if parks:
+        _park_adjust(out, league, parks)
     return out
+
+
+def _park_adjust(out: pd.DataFrame, league: League, parks: dict) -> None:
+    """Scale each PA's expectations by its park, so a hitter's record is
+    measured against what an average hitter would do in the same parks."""
+    home = out["home_team"] if "home_team" in out else pd.Series(None, index=out.index)
+    f = [parks.get((h, s), {}) for h, s in zip(home, out["stand"], strict=True)]
+    hr = pd.Series([x.get("hr", 1.0) for x in f], index=out.index)
+    one = pd.Series([x.get("1b", 1.0) for x in f], index=out.index)
+    two = pd.Series([x.get("2b", 1.0) for x in f], index=out.index)
+    three = pd.Series([x.get("3b", 1.0) for x in f], index=out.index)
+    out["e_HR"] *= hr
+    p1 = out["bip"].map({t: league.hit[t]["1B"] for t in BIP_TYPES}).fillna(0.0) * one
+    p2 = out["bip"].map({t: league.hit[t]["2B"] for t in BIP_TYPES}).fillna(0.0) * two
+    p3 = out["bip"].map({t: league.hit[t]["3B"] for t in BIP_TYPES}).fillna(0.0) * three
+    out["e_HIT"] = p1 + p2 + p3
+    out["e_XBH"] = p2 + p3
 
 
 def _opportunity(stat: str) -> str:
@@ -177,11 +198,11 @@ def blend(
     for s in seasons:
         if s.pa.empty or s.offset >= len(SEASON_WEIGHTS):
             continue
-        a = annotate(s.pa, s.league)
+        a = annotate(s.pa, s.league, s.parks)
         a["w"] = SEASON_WEIGHTS[s.offset]
         a["current"] = s.offset == 0
         history.append(a)
-    week_rows = annotate(week.pa, week.league) if not week.pa.empty else None
+    week_rows = annotate(week.pa, week.league, week.parks) if not week.pa.empty else None
     if week_rows is not None:
         week_rows["w"] = 1.0
     every = pd.concat(history + ([week_rows] if week_rows is not None else []), ignore_index=True)
@@ -208,8 +229,8 @@ def blend(
                 index=idx,
                 layers={
                     "baseline": _mean_hands(b),
-                    "process": {s: p.get(s, 1.0) for s in STATS},
-                    "results": {s: r.get(s, 1.0) for s in STATS},
+                    "process": {s: float(p.get(s, 1.0)) for s in STATS},
+                    "results": {s: float(r.get(s, 1.0)) for s in STATS},
                 },
             )
     return out
@@ -377,11 +398,11 @@ def _results(week_rows, role, me, opp_hand, base, process, league_rate) -> dict:
 
 def _clamp(x: float) -> float:
     lo, hi = INDEX_RANGE
-    return min(hi, max(lo, x))
+    return float(min(hi, max(lo, x)))
 
 
 def _mean_hands(b: dict) -> dict[str, float]:
-    return {s: sum(b[h][s] for h in HANDS) / len(HANDS) for s in STATS}
+    return {s: float(sum(b[h][s] for h in HANDS) / len(HANDS)) for s in STATS}
 
 
 # --- Stuff+ --------------------------------------------------------------------

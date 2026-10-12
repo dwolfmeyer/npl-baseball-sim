@@ -57,6 +57,7 @@ def test_blend_recovers_known_talent(history):
     week = pitches(BATTERS, PITCHERS, 3000, seed=3)
     wt = build_week_talent(week, history[1], [(1, history[0])])
     k1 = wt.players["batter:1"].layers["baseline"]["K"]
+    assert type(k1) is float and type(wt.players["batter:1"].index["L"]["K"]) is float
     assert 1.4 < k1 < 1.8  # true 1.6, a little regressed
     assert wt.players["batter:3"].layers["baseline"]["HR"] > 1.4
     assert wt.players["pitcher:1001"].layers["baseline"]["K"] > 1.3
