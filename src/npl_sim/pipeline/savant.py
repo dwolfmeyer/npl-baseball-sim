@@ -2,8 +2,9 @@
 leaderboards.
 
 Pitch data and the leaderboards pybaseball covers go through pybaseball
-(>= 2.2.7); its frames are stored raw as returned. Arm strength and park
-factors are not in pybaseball, so they are fetched from Savant directly.
+(>= 2.2.7); its frames are stored raw as returned. Arm strength, park
+factors and catcher framing are fetched from Savant directly (pybaseball
+lacks the first two, and its framing URL now redirects to an HTML page).
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ def _pybaseball_boards() -> dict[str, Callable[[int], pd.DataFrame]]:
 
     return {
         "oaa": lambda y: pb.statcast_outs_above_average(y, pos="all", min_att=1),
-        "framing": lambda y: pb.statcast_catcher_framing(y, min_called_p=1),
         "poptime": lambda y: pb.statcast_catcher_poptime(y, min_2b_att=1, min_3b_att=0),
         "sprint_speed": lambda y: pb.statcast_sprint_speed(y, min_opp=1),
     }
@@ -49,6 +49,14 @@ def _pybaseball_boards() -> dict[str, Callable[[int], pd.DataFrame]]:
 def arm_strength_url(year: int) -> str:
     return (
         f"{SAVANT}/leaderboard/arm-strength?type=player&year={year}&minThrows=1&pos=&team=&csv=true"
+    )
+
+
+def framing_url(year: int) -> str:
+    # `minPitches=1` returns every catcher; the old `min` param is ignored.
+    return (
+        f"{SAVANT}/leaderboard/catcher-framing?type=catcher&seasonStart={year}"
+        f"&seasonEnd={year}&team=&minPitches=1&csv=true"
     )
 
 
@@ -64,6 +72,9 @@ LEADERBOARDS = ("oaa", "framing", "poptime", "sprint_speed", "arm_strength", "pa
 
 def fetch_leaderboard(http: Http, name: str, year: int) -> tuple[pd.DataFrame, str]:
     """One season-to-date leaderboard as a frame, with the URL it came from."""
+    if name == "framing":
+        url = framing_url(year)
+        return pd.read_csv(io.BytesIO(http.get(url)), encoding="utf-8-sig"), url
     if name == "arm_strength":
         url = arm_strength_url(year)
         return pd.read_csv(io.BytesIO(http.get(url))), url
