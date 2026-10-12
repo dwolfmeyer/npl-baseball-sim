@@ -59,7 +59,11 @@ and league environment in; an event log out. Box scores and play-by-play are
 derived from that log only, in MLB Gameday's format: line score with LOB,
 batting and pitching tables, W/L/S/H/BS decisions, the batting, baserunning,
 fielding and pitching notes, and a play log by half inning that filters to
-all plays or scoring plays. Each PA combines batter and pitcher with
+all plays or scoring plays. A win probability chart under the line score
+shows the game's flow and marks its three biggest plays, and each play in the
+log carries its WPA and leverage index (`engine/winprob.py`: win expectancy
+by inning, half, score, runners and outs, chained from how many runs the
+engine scores from each base-out state, as in Tango's tables). Each PA combines batter and pitcher with
 multinomial log5 against the league rate for that handedness matchup, then
 applies fatigue, catcher framing, park (the only place park factors enter)
 and defense/alignment once each. Teams play straight up unless the owner

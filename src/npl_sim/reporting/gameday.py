@@ -1,5 +1,6 @@
-"""A standalone Gameday-style game page: box score and a play log filtered to
-all plays or scoring plays. The web app (Milestone 10) serves the same markup."""
+"""A standalone Gameday-style game page: line score, a win probability chart of
+the game's flow, box score, and a play log filtered to all plays or scoring
+plays. The web app (Milestone 10) serves the same markup."""
 
 from __future__ import annotations
 
@@ -42,6 +43,13 @@ border-bottom:1px solid var(--line)}.play.scoring{background:var(--score)}
 .play .meta{color:var(--muted);white-space:nowrap;text-align:right}.play .sc{font-weight:600;
 color:var(--fg)}.event{color:var(--muted);font-style:italic}.summary{color:var(--muted);
 font-size:12px;padding:6px 8px}[hidden]{display:none!important}
+.wp{margin:20px 0 0}.wp svg{width:100%;min-width:520px;height:auto;display:block}
+.wp text{fill:var(--muted);
+font-size:11px}.wp .grid{stroke:var(--line)}.wp .mid{stroke:var(--muted);stroke-dasharray:3 3}
+.wp .curve{fill:none;stroke:var(--accent);stroke-width:2}.wp .hit{fill:transparent}
+.wp .hit:hover{fill:var(--accent)}.wp .key{fill:var(--accent)}.wp .team{fill:var(--fg);
+font-weight:600}.wp ol{margin:6px 0 0;padding-left:20px;color:var(--muted)}
+.wp li span{color:var(--fg)}
 """
 
 JS = """
@@ -116,6 +124,69 @@ def _pitching(box: BoxScore, team: str) -> str:
     )
 
 
+def _pct(x: float) -> str:
+    return f"{x:+.0%}".replace("+0%", "0%").replace("-0%", "0%")
+
+
+def _win_chart(box: BoxScore, log: GameLog) -> str:
+    """Home win expectancy after every play, Tango-style: the top of the chart
+    is a sure home win, the bottom a sure road win."""
+    curve = log.win_curve()
+    if not curve:
+        return ""
+    w, h, left, top, plot_h = 720, 190, 44, 8, 160
+    step = (w - left - 8) / len(curve)
+
+    def y(we: float) -> float:
+        return top + (1 - we) * plot_h
+
+    points = [(left, y(log.home_we_start))]
+    points += [(left + (i + 1) * step, y(p.home_we)) for i, (_, p) in enumerate(curve)]
+    path = " ".join(f"{x:.1f},{yy:.1f}" for x, yy in points)
+    grid, labels, seen = [], [], set()
+    for i, (half, _) in enumerate(curve):
+        if half.inning not in seen:
+            seen.add(half.inning)
+            x = left + i * step
+            grid.append(
+                f'<line class="grid" x1="{x:.1f}" x2="{x:.1f}" y1="{top}" y2="{top + plot_h}"/>'
+            )
+            labels.append(f'<text x="{x + 3:.1f}" y="{h - 6}">{half.inning}</text>')
+    biggest = sorted(range(len(curve)), key=lambda i: -abs(curve[i][1].wpa))[:3]
+    dots = []
+    for i, (half, p) in enumerate(curve):
+        x, yy = points[i + 1]
+        tip = (
+            f"{half.label}: {p.description} {box.abbr[box.home]} {p.home_we:.0%}, "
+            f"WPA {_pct(p.wpa)} for {half.batting}"
+        )
+        cls = "key" if i in biggest else "hit"
+        dots.append(
+            f'<circle class="{cls}" cx="{x:.1f}" cy="{yy:.1f}" r="{4 if cls == "key" else 5}">'
+            f"<title>{escape(tip)}</title></circle>"
+        )
+    mid = y(0.5)
+    svg = (
+        f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="Win probability by play">'
+        f'<line class="grid" x1="{left}" x2="{w - 8}" y1="{top}" y2="{top}"/>'
+        f'<line class="grid" x1="{left}" x2="{w - 8}" y1="{top + plot_h}" y2="{top + plot_h}"/>'
+        f'<line class="mid" x1="{left}" x2="{w - 8}" y1="{mid}" y2="{mid}"/>{"".join(grid)}'
+        f'<text class="team" x="0" y="{top + 10}">{escape(box.abbr[box.home])}</text>'
+        f'<text class="team" x="0" y="{top + plot_h}">{escape(box.abbr[box.away])}</text>'
+        f'<text x="0" y="{mid + 4}">50%</text>{"".join(labels)}'
+        f'<polyline class="curve" points="{path}"/>{"".join(dots)}</svg>'
+    )
+    items = "".join(
+        f"<li><span>{escape(curve[i][0].label)}: {escape(curve[i][1].description)}</span> "
+        f"{_pct(curve[i][1].wpa)} for {escape(curve[i][0].batting)}</li>"
+        for i in sorted(biggest)
+    )
+    return (
+        f'<section class="wp"><h2>Win probability</h2><div class="wrap">{svg}</div>'
+        f"<h3>BIGGEST PLAYS</h3><ol>{items}</ol></section>"
+    )
+
+
 def _plays(log: GameLog) -> str:
     out = []
     for half, plays in log.plays("all"):
@@ -130,6 +201,9 @@ def _plays(log: GameLog) -> str:
                 meta.append(f'<span class="sc">{escape(p.score_text)}</span>')
             if p.count:
                 meta.append(f"{p.count}, {p.outs} out")
+            if p.wpa is not None:
+                swing = f"WPA {_pct(p.wpa)}"
+                meta.append(f"{swing} · LI {p.li:.1f}" if p.li is not None else swing)
             items.append(
                 f'<div class="{cls}"><div>{desc}</div>'
                 f'<div class="meta">{"<br>".join(meta)}</div></div>'
@@ -143,10 +217,11 @@ def _plays(log: GameLog) -> str:
 
 
 def game_body(box: BoxScore, log: GameLog) -> str:
-    """The line score, Box and Play-by-play tabs, for embedding in a page that
-    includes `CSS` and `JS` (the web app's game page does)."""
+    """The line score, win probability chart, Box and Play-by-play tabs, for
+    embedding in a page that includes `CSS` and `JS` (the web app's game page does)."""
     game_notes = "".join(f"<p><b>{escape(k)}:</b> {escape(v)}</p>" for k, v in box.game_notes)
     return f"""{_line_score(box)}
+{_win_chart(box, log)}
 <div class="tabs" role="tablist">
 <button role="tab" aria-selected="true" data-panel="box">Box</button>
 <button role="tab" aria-selected="false" data-panel="plays">Play-by-play</button></div>
