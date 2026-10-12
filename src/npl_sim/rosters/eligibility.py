@@ -1,6 +1,7 @@
-"""Games by position and batting hands for rostered players, saved for the
-lineup card. The eligibility rule itself (20 MLB games at a position last
-season or 10 this season) lives in `npl_sim.eligibility`.
+"""Games by position, batting hands and pitching lines (G, GS, outs, saves,
+holds) for rostered players, saved for the lineup card. The eligibility rule
+itself (20 MLB games at a position last season or 10 this season) lives in
+`npl_sim.eligibility`.
 
 Games come from the MLB Stats API's season fielding splits, which the lineup
 card can use before the pipeline has a season of box scores. They are saved,
@@ -30,6 +31,17 @@ class PlayerRecord:
     bats: str | None = None
     throws: str | None = None
     games: dict[int, dict[str, int]] = field(default_factory=dict)  # season -> pos -> games
+    # season -> {"g", "gs", "outs", "sv", "hld"}, for pitchers
+    pitching: dict[int, dict[str, int]] = field(default_factory=dict)
+
+    def total(self, stat: str, seasons: Iterable[int]) -> int:
+        """A pitching stat summed over these seasons."""
+        return sum(self.pitching.get(s, {}).get(stat, 0) for s in seasons)
+
+    def games_played(self, seasons: Iterable[int]) -> int:
+        """Fielding games at all positions over these seasons (a game at two
+        positions counts twice; close enough for ranking regulars)."""
+        return sum(sum(self.games.get(s, {}).values()) for s in seasons)
 
 
 @dataclass
@@ -75,6 +87,11 @@ class Eligibility:
                     "bats": rec.bats,
                     "throws": rec.throws,
                     "games": {str(s): g for s, g in sorted(rec.games.items())},
+                    **(
+                        {"pitching": {str(s): p for s, p in sorted(rec.pitching.items())}}
+                        if rec.pitching
+                        else {}
+                    ),
                 }
                 for pid, rec in sorted(self.players.items())
             },
@@ -87,6 +104,7 @@ class Eligibility:
                 bats=rec.get("bats"),
                 throws=rec.get("throws"),
                 games={int(s): dict(g) for s, g in rec.get("games", {}).items()},
+                pitching={int(s): dict(p) for s, p in rec.get("pitching", {}).items()},
             )
             for pid, rec in data.get("players", {}).items()
         }
@@ -143,8 +161,46 @@ def parse_people_fielding(raw: dict, seasons: Iterable[int]) -> dict[int, Player
     return out
 
 
+PITCHING_FIELDS = {
+    "g": "gamesPitched",
+    "gs": "gamesStarted",
+    "outs": "outs",
+    "sv": "saves",
+    "hld": "holds",
+}
+
+
+def parse_people_pitching(raw: dict, seasons: Iterable[int]) -> dict[int, dict[int, dict]]:
+    """Season pitching lines (see PITCHING_FIELDS) by player from a `/people`
+    response hydrated with season pitching stats."""
+    wanted = set(seasons)
+    out: dict[int, dict[int, dict]] = {}
+    for person in raw.get("people", []):
+        per_team: dict[int, dict] = {}
+        combined: dict[int, dict] = {}
+        for block in person.get("stats", []):
+            if block.get("group", {}).get("displayName") != "pitching":
+                continue
+            for split in block.get("splits", []):
+                season = int(split.get("season") or 0)
+                if season not in wanted:
+                    continue
+                stat = split.get("stat", {})
+                line = {k: int(stat.get(v) or 0) for k, v in PITCHING_FIELDS.items()}
+                # As with fielding, a traded pitcher has a combined split plus one per team.
+                into = combined if (split.get("numTeams") or 1) > 1 else per_team
+                have = into.setdefault(season, dict.fromkeys(PITCHING_FIELDS, 0))
+                for k, v in line.items():
+                    have[k] += v
+        lines = per_team | combined
+        if lines:
+            out[int(person["id"])] = lines
+    return out
+
+
 def fetch(http: Http, ids: Iterable[int], season: int) -> Eligibility:
-    """Pull last season's and this season's fielding games for these players."""
+    """Pull last season's and this season's fielding games and pitching lines
+    for these players."""
     ids = sorted(set(ids))
     seasons = (season - 1, season)
     elig = Eligibility(season=season)
@@ -153,11 +209,13 @@ def fetch(http: Http, ids: Iterable[int], season: int) -> Eligibility:
         for s in seasons:
             params = {
                 "personIds": ",".join(map(str, ids[i : i + PEOPLE_BATCH])),
-                "hydrate": f"stats(group=[fielding],type=[season],season={s})",
+                "hydrate": f"stats(group=[fielding,pitching],type=[season],season={s})",
             }
             raw = json.loads(http.get(f"{BASE}/people", params))
             for pid, rec in parse_people_fielding(raw, [s]).items():
                 into = merged.setdefault(pid, PlayerRecord(bats=rec.bats, throws=rec.throws))
                 into.games.update(rec.games)
+            for pid, lines in parse_people_pitching(raw, [s]).items():
+                merged.setdefault(pid, PlayerRecord()).pitching.update(lines)
         elig.players.update(merged)
     return elig

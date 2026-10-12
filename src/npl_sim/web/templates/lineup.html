@@ -39,6 +39,28 @@ function renumber(list) {
   });
 }
 
+// Autofill: post the card to the autofill route and show the filled card (not saved yet).
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-autofill]');
+  if (!btn) return;
+  ev.preventDefault();
+  const form = btn.closest('form');
+  const resp = await fetch(btn.formAction, {
+    method: 'POST', body: new URLSearchParams(new FormData(form)), headers: {'HX-Request': 'true'},
+  });
+  if (resp.ok) form.outerHTML = await resp.text();
+});
+
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-select-all]');
+  if (!btn) return;
+  const form = btn.closest('form');
+  form.querySelectorAll('input[name="active"]').forEach((box) => {
+    box.checked = btn.dataset.selectAll === '1';
+  });
+  recheck(form);
+});
+
 document.addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-move]');
   if (!btn) return;

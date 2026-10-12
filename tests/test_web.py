@@ -10,8 +10,10 @@ from npl_sim.rosters.sources import players_from_dump
 from npl_sim.web.app import create_app
 from npl_sim.web.lineup import (
     ACTIVE_LIMIT,
+    DefensiveSub,
     LineupCard,
     StarterPlan,
+    autofill,
     default_card,
     fielding,
     team_card,
@@ -149,6 +151,13 @@ def form_for(card: LineupCard) -> dict:
         data[f"sp_tto_{i}"] = str(plan.tto_hook)
         data[f"sp_opener_{i}"] = str(plan.opener or "")
         data[f"sp_piggyback_{i}"] = str(plan.piggyback or "")
+    for i, sub in enumerate(card.subs, 1):
+        data[f"sub_player_{i}"] = str(sub.player)
+        data[f"sub_pos_{i}"] = sub.position
+        data[f"sub_inning_{i}"] = str(sub.from_inning)
+        data[f"sub_replaces_{i}"] = str(sub.replaces or "")
+        if sub.only_when_leading:
+            data[f"sub_leading_{i}"] = "1"
     for key, on in card.defense.items():
         if on:
             data[f"def_{key}"] = "1"
@@ -244,3 +253,70 @@ def test_defense_boxes_become_engine_rules():
     card.defense = {"guard_lines": True, "infield_in": True}
     rules = team_card(DUCKS, "DUC", card, r, 0, "R", ELIG).alignment_rules
     assert [rule.preset for rule in rules] == ["infield_in", "guard_lines"]
+
+
+def test_autofill_uses_games_at_each_position():
+    r = roster(DUCKS)
+    elig = Eligibility(
+        season=2026,
+        players={
+            **ELIG.players,
+            # Two catchers: the one with more games behind the plate gets it.
+            691788: PlayerRecord("L", "R", {2025: {"C": 90}}),
+            GOODMAN: PlayerRecord("R", "R", {2025: {"C": 70, "RF": 21}}),
+            # Starters and a closer by their pitching lines.
+            543037: PlayerRecord(pitching={2025: {"g": 32, "gs": 32, "outs": 600}}),
+            656730: PlayerRecord(pitching={2025: {"g": 60, "gs": 0, "outs": 180, "sv": 30}}),
+        },
+    )
+    card = autofill(LineupCard(active=[p.mlb_id for p in r]), r, elig)
+    assert len(card.active) == ACTIVE_LIMIT
+    rhp = dict((pos, pid) for pid, pos in card.orders["rhp"])
+    assert rhp["C"] == 691788 and rhp["SS"] == HENDERSON
+    assert sorted(rhp) == sorted(["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"])
+    assert card.rotation[0] == 543037 and len(card.rotation) == 5
+    assert card.roles[656730] == "CL"
+    assert validate(card, r, elig).ok, validate(card, r, elig).errors
+
+
+def test_defensive_subs_round_trip_and_checks():
+    r = roster(DUCKS)
+    card = default_card(r, ELIG)
+    starting = {pid for pid, _ in card.orders["rhp"]}
+    bench = next(
+        p.mlb_id for p in r if p.mlb_id in card.active and p.mlb_id not in starting and not p.throws
+    )
+    card.subs = [DefensiveSub(player=bench, position="LF", replaces=card.orders["rhp"][0][0])]
+    assert LineupCard.from_json(card.to_json()).subs == card.subs
+    assert validate(card, r, ELIG).ok
+    card.subs.append(DefensiveSub(player=bench, position="DH"))
+    errors = " ".join(validate(card, r, ELIG).errors)
+    assert "listed as a defensive replacement twice" in errors
+    assert "Pick a field position" in errors
+
+
+def test_picked_players_drop_out_of_other_dropdowns(client):
+    page = client.get("/teams/midwest-ducksnorts/lineup").text
+    card = default_card(roster(DUCKS), ELIG)
+    leadoff = card.orders["rhp"][0][0]
+    # The leadoff man is an option only in his own vs-RHP slot.
+    rhp_selects = [s for s in page.split("<select") if 'name="rhp_player_' in s]
+    assert sum(f'value="{leadoff}"' in s for s in rhp_selects) == 1
+    starters = [
+        s
+        for s in page.split("<select")
+        if 'name="sp_' in s
+        and "_limit" not in s
+        and "_tto" not in s
+        and "opener" not in s
+        and "piggyback" not in s
+    ]
+    assert sum(f'value="{card.rotation[0]}"' in s for s in starters) == 1
+
+
+def test_autofill_route(client):
+    data = form_for(default_card(roster(DUCKS), ELIG))
+    resp = client.post(
+        "/teams/midwest-ducksnorts/lineup/autofill", data=data, headers={"HX-Request": "true"}
+    )
+    assert resp.status_code == 200 and "<html" not in resp.text and "card is legal" in resp.text

@@ -104,7 +104,9 @@ MLB Stats API:
 npl-sim eligibility --season 2026 --from-dump tests/fixtures/npl_2026_test_teams.json
 ```
 
-which writes `data/eligibility/2026.json`. A player with no MLB fielding
+which writes `data/eligibility/2026.json`, with season pitching lines (G, GS,
+outs, saves, holds) that the card's Autofill button uses for the rotation and
+bullpen roles. A player with no MLB fielding
 record falls back to his NPL roster position. Cards and
 games are stored as JSON under `NPL_WEB_DATA` (default `data/web`). Until the
 weekly MLB cards are wired in, every player sims at league-average rates.

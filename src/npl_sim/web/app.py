@@ -45,6 +45,8 @@ TEMPLATES.env.globals.update(
     pitch_limits=lineup.PITCH_LIMITS,
     tto_hooks=lineup.TTO_HOOKS,
     defense_rules=lineup.DEFENSE_RULES,
+    sub_rows=lineup.DEFENSIVE_SUB_ROWS,
+    sub_innings=lineup.SUB_INNINGS,
 )
 
 
@@ -142,6 +144,13 @@ def create_app(
     async def check_card(request: Request, team_slug: str):
         team = team_for(team_slug)
         card = lineup.LineupCard.from_form(await request.form())
+        return card_page(request, team, card, check(card, team), False)
+
+    @app.post("/teams/{team_slug}/lineup/autofill", response_class=HTMLResponse)
+    async def autofill_card(request: Request, team_slug: str):
+        team = team_for(team_slug)
+        card = lineup.LineupCard.from_form(await request.form())
+        card = lineup.autofill(card, rosters[team], elig)
         return card_page(request, team, card, check(card, team), False)
 
     @app.post("/teams/{team_slug}/lineup")

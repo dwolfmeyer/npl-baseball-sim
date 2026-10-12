@@ -75,6 +75,23 @@ class StarterPlan:
 
 
 @dataclass
+class DefensiveSub:
+    """A late-game defensive replacement: `player` comes off the bench to play
+    `position` from `from_inning` on, replacing `replaces` (a specific starter)
+    or, when that is None, whoever is playing the position."""
+
+    player: int
+    position: str
+    from_inning: int = 9
+    only_when_leading: bool = True
+    replaces: int | None = None
+
+
+DEFENSIVE_SUB_ROWS = 4
+SUB_INNINGS = range(6, 13)
+
+
+@dataclass
 class LineupCard:
     active: list[int] = field(default_factory=list)
     # Batting order by starter hand ("rhp"/"lhp"): nine (player id, position) slots.
@@ -83,6 +100,7 @@ class LineupCard:
     plans: list[StarterPlan] = field(default_factory=list)  # one per rotation slot
     roles: dict[int, str] = field(default_factory=dict)  # reliever id -> role
     defense: dict[str, bool] = field(default_factory=dict)  # DEFENSE_RULES key -> on
+    subs: list[DefensiveSub] = field(default_factory=list)
 
     def plan(self, slot: int) -> StarterPlan:
         return self.plans[slot] if slot < len(self.plans) else StarterPlan()
@@ -95,6 +113,7 @@ class LineupCard:
             "plans": [asdict(p) for p in self.plans],
             "roles": {str(k): v for k, v in self.roles.items()},
             "defense": self.defense,
+            "subs": [asdict(sub) for sub in self.subs],
         }
 
     @classmethod
@@ -106,6 +125,7 @@ class LineupCard:
             plans=[StarterPlan(**p) for p in data.get("plans", [])],
             roles={int(k): v for k, v in data.get("roles", {}).items()},
             defense={k: bool(v) for k, v in data.get("defense", {}).items() if k in DEFENSE_RULES},
+            subs=[DefensiveSub(**sub) for sub in data.get("subs", [])],
         )
 
     @classmethod
@@ -146,6 +166,17 @@ class LineupCard:
             plans=plans,
             roles=roles,
             defense={key: bool(get(f"def_{key}")) for key in DEFENSE_RULES},
+            subs=[
+                DefensiveSub(
+                    player=player,
+                    position=get(f"sub_pos_{i}") or "",
+                    from_inning=pid(f"sub_inning_{i}") or 9,
+                    only_when_leading=bool(get(f"sub_leading_{i}")),
+                    replaces=pid(f"sub_replaces_{i}"),
+                )
+                for i in range(1, DEFENSIVE_SUB_ROWS + 1)
+                if (player := pid(f"sub_player_{i}")) is not None
+            ],
         )
 
 
@@ -228,6 +259,32 @@ def validate(card: LineupCard, roster: list[NplPlayer], elig: Eligibility | None
                     f"{name(pid)} is in the rotation, so he can't be starter {slot + 1}'s {what}."
                 )
 
+    starting = {pid for slots in card.orders.values() for pid, _ in slots if pid is not None}
+    used_subs = [sub.player for sub in card.subs]
+    for sub in card.subs:
+        who = name(sub.player)
+        if sub.player not in active or sub.player not in by_id or is_pitcher(by_id[sub.player]):
+            check.errors.append(f"Defensive replacement {who} must be an active hitter.")
+            continue
+        if used_subs.count(sub.player) > 1:
+            check.errors.append(f"{who} is listed as a defensive replacement twice.")
+        if sub.position not in POSITIONS or sub.position == "DH":
+            check.errors.append(f"Pick a field position for defensive replacement {who}.")
+        elif not can_play(by_id[sub.player], sub.position, elig):
+            check.warnings.append(
+                f"Defensive replacement {who} is out of position at {sub.position}."
+            )
+        if sub.replaces is not None and sub.replaces not in starting:
+            check.errors.append(
+                f"{who} replaces {name(sub.replaces)}, who isn't in a batting order."
+            )
+        if sub.replaces == sub.player:
+            check.errors.append(f"{who} can't replace himself.")
+        if all(sub.player in [pid for pid, _ in slots] for slots in card.orders.values()):
+            check.warnings.append(
+                f"{who} starts in both batting orders, so he's never on the bench."
+            )
+
     relievers = [pid for pid in card.roles if pid in active and pid not in starters]
     closers = [pid for pid in relievers if card.roles[pid] == "CL"]
     if len(closers) != 1:
@@ -280,6 +337,100 @@ def default_card(roster: list[NplPlayer], elig: Eligibility | None = None) -> Li
         orders={side: list(order) for side in SIDES},
         rotation=rotation,
         plans=[StarterPlan() for _ in rotation],
+        roles=roles,
+    )
+
+
+def autofill(card: LineupCard, roster: list[NplPlayer], elig: Eligibility) -> LineupCard:
+    """Fill the batting orders, rotation and bullpen roles from the active
+    players, using position eligibility and MLB games over the last two seasons:
+
+    - each field position goes to the eligible hitter with the most games
+      there; the DH is the remaining hitter with the most games, and the order
+      runs from most games played to fewest;
+    - the five pitchers with the most starts form the rotation; the closer has
+      the most saves, two setup men the most holds, the long man the most
+      innings per game, and the rest pitch middle relief.
+
+    Active players are kept; when there are more than 30 the ones with the
+    fewest games sit. Plans, defense and defensive subs carry over.
+    """
+    seasons = (elig.season - 1, elig.season)
+    by_id = {p.mlb_id: p for p in roster}
+    rec = {pid: elig.players.get(pid) for pid in by_id}
+
+    def played(pid: int) -> int:
+        r = rec.get(pid)
+        if r is None:
+            return 0
+        return r.total("g", seasons) if is_pitcher(by_id[pid]) else r.games_played(seasons)
+
+    active = [pid for pid in card.active if pid in by_id] or list(by_id)
+    active = sorted(active, key=played, reverse=True)[:ACTIVE_LIMIT]
+    hitters = [pid for pid in active if not is_pitcher(by_id[pid])]
+    arms = [pid for pid in active if is_pitcher(by_id[pid])]
+
+    def at(pid: int, pos: str) -> int:
+        r = rec.get(pid)
+        return sum(r.games.get(s, {}).get(pos, 0) for s in seasons) if r else 0
+
+    # Most games at a position wins it, one pair at a time.
+    picks: dict[str, int] = {}
+    pairs = sorted(
+        (
+            (at(pid, pos), pid, pos)
+            for pid in hitters
+            for pos in POSITIONS[:-1]
+            if can_play(by_id[pid], pos, elig)
+        ),
+        reverse=True,
+    )
+    for _, pid, pos in pairs:
+        if pos not in picks and pid not in picks.values():
+            picks[pos] = pid
+    for pos in POSITIONS:
+        if pos not in picks:
+            rest = sorted((h for h in hitters if h not in picks.values()), key=played)
+            if rest:
+                picks[pos] = rest[-1]
+    order = sorted(((pid, pos) for pos, pid in picks.items()), key=lambda s: -played(s[0]))
+
+    def pitching(pid: int, stat: str) -> int:
+        r = rec.get(pid)
+        return r.total(stat, seasons) if r else 0
+
+    # Most starts; among pitchers short on starts, keep the late-inning arms in the pen.
+    rotation = sorted(
+        arms,
+        key=lambda pid: (
+            pitching(pid, "gs"),
+            -pitching(pid, "sv") - pitching(pid, "hld"),
+            pitching(pid, "outs"),
+        ),
+        reverse=True,
+    )[:ROTATION_SIZE]
+    pen = [pid for pid in arms if pid not in rotation]
+    roles: dict[int, str] = {}
+    if pen:
+        closer = max(pen, key=lambda pid: (pitching(pid, "sv"), pitching(pid, "hld")))
+        roles[closer] = "CL"
+        setup = sorted(
+            (pid for pid in pen if pid not in roles),
+            key=lambda pid: (pitching(pid, "hld"), pitching(pid, "sv")),
+            reverse=True,
+        )[:2]
+        roles.update(dict.fromkeys(setup, "SU"))
+        rest = [pid for pid in pen if pid not in roles]
+        if rest:
+            long_man = max(rest, key=lambda pid: pitching(pid, "outs") / max(1, pitching(pid, "g")))
+            roles[long_man] = "LR"
+        roles.update({pid: "MR" for pid in pen if pid not in roles})
+    return replace(
+        card,
+        active=active,
+        orders={side: list(order) for side in SIDES},
+        rotation=rotation,
+        plans=[card.plan(i) for i in range(len(rotation))],
         roles=roles,
     )
 
