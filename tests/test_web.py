@@ -130,6 +130,7 @@ def test_opener_and_piggyback_plan():
     assert tc.starter.id == str(card.rotation[1]) and tc.starter.pitch_limit == 25
     assert tc.bullpen[0].id == str(piggyback) and tc.bullpen[0].pitch_limit == 80
     assert len({p.id for p in tc.bullpen}) == len(tc.bullpen)  # nobody listed twice
+    assert tc.follow == (str(piggyback),) and str(piggyback) not in tc.relief
     # Without the opener box the piggyback doesn't apply.
     card.plans[1] = StarterPlan(pitch_limit=80, piggyback=piggyback)
     tc = team_card(DUCKS, "DUC", card, r, 1, "R", ELIG)
@@ -407,3 +408,21 @@ def test_reliever_usage_round_trip(client):
     assert f'name="rp_use_{pen[0]}"' in html and "Mop-up (blowouts)" in html
     use = html.split(f'name="rp_use_{pen[0]}"')[1].split("</select>")[0]
     assert '<option value="mopup" selected>' in use
+
+
+def test_reliever_usage_reaches_the_engine():
+    r = roster(DUCKS)
+    card = default_card(r, ELIG)
+    by_role = {}
+    for pid, role in card.roles.items():
+        if pid not in card.rotation:
+            by_role.setdefault(role, []).append(pid)
+    closer, middle = by_role["CL"][0], by_role["MR"][0]
+    card.relief = {middle: ReliefPlan(usage="mopup", vs="L", start_of_inning_only=True)}
+    tc = team_card("Ducks", "MDK", card, r, 0, "R", ELIG)
+    assert tc.follow == ()
+    assert tc.relief[str(closer)].role == "high"
+    mop = tc.relief[str(middle)]
+    assert (mop.role, mop.vs, mop.start_of_inning_only, mop.outs) == ("mopup", "L", True, 9)
+    # A mop-up man has the pitches for three innings.
+    assert next(p for p in tc.bullpen if p.id == str(middle)).pitch_limit == 54

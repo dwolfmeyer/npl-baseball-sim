@@ -101,7 +101,7 @@
 
 <section class="card">
   <h2>Bullpen</h2>
-  <p class="muted small">Drag a reliever to another role, or onto a rotation spot to make him a starter (that starter takes his role). "Use in" defaults to his role: closer and setup in high leverage, middle in medium, long man for long relief. A specialist comes in for same-side batters. Saved on the card; the engine uses these once its bullpen logic lands, until then relievers enter long, middle, setup, then closer.</p>
+  <p class="muted small">Drag a reliever to another role, or onto a rotation spot to make him a starter (that starter takes his role). "Use in" defaults to his role: closer and setup in high leverage, middle in medium, long man for long relief. A specialist comes in for same-side batters. When the starter comes out, the sim reads the inning, score and bases and brings in the reliever whose setting fits; a closer isn't required.</p>
   {% set pen = arms | selectattr("mlb_id", "in", active) | rejectattr("mlb_id", "in", rotation) | list %}
   <div class="wrap"><table class="order pen">
   <thead><tr><th></th><th>Reliever</th><th>Role</th><th>Use in</th><th>Faces</th><th>Stint</th><th>Start of inning only</th></tr></thead>
