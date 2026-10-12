@@ -464,3 +464,17 @@ def test_starter_hooks_round_trip_and_reach_the_engine(client):
     assert '<option value="4" selected>' in runs
     li2 = html.split('id="sp_li_inning_2"')[1].split(">")[0]
     assert "disabled" in li2  # no big-spot hook, so its inning is greyed out
+
+
+def test_sim_a_week(client):
+    resp = client.post("/weeks", data={"seed": "11"})
+    assert resp.status_code == 200 and "NPL test week" in resp.text and "Standings" in resp.text
+    assert all(team in resp.text for team in (DUCKS, MCFLYS, ROPES))
+    # Three teams: one sits each day, so seven games, each with its own game page.
+    games = resp.text.count(">Box score</a>")
+    assert games == 7
+    link = resp.text.split('href="/games/')[1].split('"')[0]
+    assert "Play-by-play" in client.get(f"/games/{link}").text
+    home = client.get("/").text
+    assert "Test week 1" in home
+    assert client.get("/weeks/99").status_code == 404

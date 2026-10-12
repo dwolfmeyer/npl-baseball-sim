@@ -22,10 +22,12 @@ from npl_sim.engine.game import simulate_game
 from npl_sim.engine.playlog import game_log
 from npl_sim.league import load_league_file, team_slots
 from npl_sim.reporting import gameday
+from npl_sim.reporting.week import render_week, standings
 from npl_sim.rosters import eligibility
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.rosters.sources import NPL_DATABASE_URL_ENV, players_from_database, players_from_dump
+from npl_sim.simweek import round_robin, sim_week
 from npl_sim.web import lineup
 from npl_sim.web.store import Store, slug
 
@@ -139,7 +141,9 @@ def create_app(
             for s in slots
         ]
         return TEMPLATES.TemplateResponse(
-            request, "home.html", {"teams": teams, "games": store.recent_games()}
+            request,
+            "home.html",
+            {"teams": teams, "games": store.recent_games(), "weeks": store.recent_weeks()},
         )
 
     @app.get("/teams/{team_slug}/lineup", response_class=HTMLResponse)
@@ -230,6 +234,74 @@ def create_app(
             }
         )
         return RedirectResponse(f"/games/{game_id}", status_code=303)
+
+    @app.post("/weeks")
+    async def play_week(request: Request):
+        """Sim a test week between every team with a roster, from their lineup
+        cards (saved, or the default), at each player's season pace."""
+        form = await request.form()
+        seed_text = str(form.get("seed") or "").strip()
+        seed = int(seed_text) if seed_text.isdigit() else random.randrange(1, 10**6)
+        teams = sorted(playable)
+        cards = {}
+        for team in teams:
+            card, _ = card_for(team)
+            result = check(card, team)
+            if not result.ok:
+                raise HTTPException(400, f"{team}'s lineup card has errors: {result.errors[0]}")
+            cards[team] = card
+        week_rosters = {t: rosters[t] for t in teams}
+        result = sim_week(cards, week_rosters, elig, round_robin(teams), None, seed)
+        game_ids = []
+        for g in result.games:
+            events = g["events"]
+            pitchers = {
+                side: {p["id"]: p["name"] for p in events[0][side]["pitchers"]}
+                for side in ("away", "home")
+            }
+            starters = {
+                side: pitchers[side].get(g["moves"][g[side]].starter, "")
+                for side in ("away", "home")
+            }
+            final = events[-1]
+            game_ids.append(
+                store.save_game(
+                    {
+                        "away": g["away"],
+                        "home": g["home"],
+                        "seed": seed,
+                        "starters": starters,
+                        "runs": {"away": final["away"], "home": final["home"]},
+                        "events": events,
+                    }
+                )
+            )
+        names = {str(p.mlb_id): p.name for r in week_rosters.values() for p in r}
+        page = render_week(
+            result,
+            "NPL test week",
+            f"Playing time: a typical week at each player's {SEASON} pace. Seed {seed}.",
+            link=lambda i: f"/games/{game_ids[i]}",
+            names=names,
+        )
+        page = page.replace("<main>", '<main><p class="sub"><a href="/">Back to teams</a></p>', 1)
+        week_id = store.save_week(
+            {
+                "seed": seed,
+                "teams": teams,
+                "games": game_ids,
+                "standings": [list(row) for row in standings(result)],
+                "page": page,
+            }
+        )
+        return RedirectResponse(f"/weeks/{week_id}", status_code=303)
+
+    @app.get("/weeks/{week_id}", response_class=HTMLResponse)
+    def week_page(week_id: str):
+        week = store.load_week(week_id)
+        if week is None:
+            raise HTTPException(404, "No such week")
+        return HTMLResponse(week["page"])
 
     @app.get("/games/{game_id}", response_class=HTMLResponse)
     def game_page(request: Request, game_id: str):

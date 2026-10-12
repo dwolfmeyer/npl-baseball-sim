@@ -24,6 +24,7 @@ class Store:
         self.root = Path(root or os.environ.get(WEB_DATA_ENV) or "data/web")
         (self.root / "lineups").mkdir(parents=True, exist_ok=True)
         (self.root / "games").mkdir(parents=True, exist_ok=True)
+        (self.root / "weeks").mkdir(parents=True, exist_ok=True)
 
     def load_card(self, team: str) -> LineupCard | None:
         path = self.root / "lineups" / f"{slug(team)}.json"
@@ -50,6 +51,25 @@ class Store:
     def load_game(self, game_id: str) -> dict | None:
         path = self.root / "games" / f"{game_id}.json"
         return json.loads(path.read_text()) if game_id.isdigit() and path.exists() else None
+
+    def save_week(self, week: dict) -> str:
+        existing = [int(p.stem) for p in (self.root / "weeks").glob("*.json") if p.stem.isdigit()]
+        week_id = str(max(existing, default=0) + 1)
+        week = {**week, "id": week_id, "played_at": datetime.now(UTC).isoformat(timespec="seconds")}
+        (self.root / "weeks" / f"{week_id}.json").write_text(json.dumps(week))
+        return week_id
+
+    def load_week(self, week_id: str) -> dict | None:
+        path = self.root / "weeks" / f"{week_id}.json"
+        return json.loads(path.read_text()) if week_id.isdigit() and path.exists() else None
+
+    def recent_weeks(self, limit: int = 10) -> list[dict]:
+        paths = sorted(
+            (p for p in (self.root / "weeks").glob("*.json") if p.stem.isdigit()),
+            key=lambda p: int(p.stem),
+            reverse=True,
+        )
+        return [json.loads(p.read_text()) for p in paths[:limit]]
 
     def recent_games(self, limit: int = 20) -> list[dict]:
         paths = sorted(

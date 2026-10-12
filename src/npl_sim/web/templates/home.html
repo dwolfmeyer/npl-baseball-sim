@@ -18,7 +18,22 @@
 </table></div>
 </section>
 <section>
-<h2>Recent games</h2>
+<h2>Sim a week</h2>
+<p class="muted small">Every team with a roster plays a round robin for seven days from its lineup card (saved, or the default), with each player's playing time at his {{ 2026 }} pace.</p>
+<form method="post" action="/weeks" class="actions">
+  <label>Seed <input name="seed" inputmode="numeric" placeholder="random" size="8"></label>
+  <button class="btn" type="submit">Sim week</button>
+</form>
+{% if weeks %}
+<div class="wrap"><table>
+<tr><th>Week</th><th>Leader</th><th>Seed</th></tr>
+{% for w in weeks %}
+<tr><td><a href="/weeks/{{ w.id }}">Test week {{ w.id }}</a></td>
+<td>{{ w.standings[0][0] }} {{ w.standings[0][1] }}–{{ w.standings[0][2] }}</td><td class="muted">{{ w.seed }}</td></tr>
+{% endfor %}
+</table></div>
+{% endif %}
+<h2 style="margin-top:20px">Recent games</h2>
 {% if games %}
 <div class="wrap"><table>
 <tr><th>Game</th><th>Final</th><th>Seed</th></tr>
