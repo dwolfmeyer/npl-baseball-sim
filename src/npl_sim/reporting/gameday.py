@@ -140,15 +140,11 @@ def _plays(log: GameLog) -> str:
     return "".join(out)
 
 
-def render_game(box: BoxScore, log: GameLog, title: str | None = None, subtitle: str = "") -> str:
-    """Full HTML page for one game."""
-    title = title or f"{box.away} {box.runs[box.away]}, {box.home} {box.runs[box.home]}"
+def game_body(box: BoxScore, log: GameLog) -> str:
+    """The line score, Box and Play-by-play tabs, for embedding in a page that
+    includes `CSS` and `JS` (the web app's game page does)."""
     game_notes = "".join(f"<p><b>{escape(k)}:</b> {escape(v)}</p>" for k, v in box.game_notes)
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{escape(title)}</title><style>{CSS}</style></head><body><main>
-<h1>{escape(title)}</h1><p class="sub">{escape(subtitle)}</p>
-{_line_score(box)}
+    return f"""{_line_score(box)}
 <div class="tabs" role="tablist">
 <button role="tab" aria-selected="true" data-panel="box">Box</button>
 <button role="tab" aria-selected="false" data-panel="plays">Play-by-play</button></div>
@@ -158,5 +154,15 @@ def render_game(box: BoxScore, log: GameLog, title: str | None = None, subtitle:
 <div id="plays" hidden><div class="filter" role="group" aria-label="Plays">
 <button aria-pressed="true" data-filter="all">All plays</button>
 <button aria-pressed="false" data-filter="scoring">Scoring plays</button></div>
-{_plays(log)}</div>
+{_plays(log)}</div>"""
+
+
+def render_game(box: BoxScore, log: GameLog, title: str | None = None, subtitle: str = "") -> str:
+    """Full HTML page for one game."""
+    title = title or f"{box.away} {box.runs[box.away]}, {box.home} {box.runs[box.home]}"
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{escape(title)}</title><style>{CSS}</style></head><body><main>
+<h1>{escape(title)}</h1><p class="sub">{escape(subtitle)}</p>
+{game_body(box, log)}
 </main><script>{JS}</script></body></html>"""

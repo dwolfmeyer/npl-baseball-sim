@@ -72,6 +72,21 @@ npl-sim demo-game --seed 3 --html game.html  # Gameday-style page: Box / Play-by
 League structure lives in `config/league.yaml`. When divisions realign, add a
 new alignment block with its `from_season`; past seasons keep their divisions.
 
+### Web app
+
+```sh
+npl-sim web                   # http://127.0.0.1:8000
+```
+
+Each team's page is its weekly lineup card: up to 30 active players, batting
+orders against right- and left-handed starters (with DH), a five-man rotation
+and bullpen roles, checked against the roster as you edit. "Sim a game" plays
+two teams' saved cards and shows the Gameday box score and play-by-play.
+Rosters come from `NPL_DATABASE_URL` when set, otherwise from a dump
+(`NPL_ROSTER_DUMP`, default the Ducksnorts/McFlys test fixture). Cards and
+games are stored as JSON under `NPL_WEB_DATA` (default `data/web`). Until the
+weekly MLB cards are wired in, every player sims at league-average rates.
+
 ### MLB data
 
 ```sh

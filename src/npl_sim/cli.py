@@ -1,5 +1,5 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`, `demo-game`, and the MLB data pipeline (`pull-week`, `backfill`,
+`generate-schedule`, `demo-game`, `web`, and the MLB data pipeline (`pull-week`, `backfill`,
 `check-calendar`, `sync-mlb`)."""
 
 from __future__ import annotations
@@ -62,6 +62,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="also print the play log: every play or scoring plays only",
     )
     demo.add_argument("--html", type=Path, help="write a Gameday-style game page here")
+
+    web = sub.add_parser("web", help="run the web app (lineup cards and game results)")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8000)
 
     def pipeline_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--season", type=int, required=True)
@@ -154,6 +158,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.html:
             args.html.write_text(render_game(box, game_log(events)))
             print(f"\nWrote {args.html}")
+    elif args.cmd == "web":
+        import uvicorn
+
+        from npl_sim.web.app import create_app
+
+        uvicorn.run(create_app(), host=args.host, port=args.port)
     elif args.cmd in ("pull-week", "backfill", "check-calendar", "sync-mlb"):
         return _pipeline_command(args)
     return 0

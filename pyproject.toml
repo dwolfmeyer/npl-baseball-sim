@@ -17,10 +17,14 @@ dependencies = [
     # 2.2.7 is the newest release; its FanGraphs scraper is stale, so
     # FanGraphs goes through the site's JSON API instead (pipeline/fangraphs.py).
     "pybaseball>=2.2.7",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]
 npl-sim = "npl_sim.cli:main"
