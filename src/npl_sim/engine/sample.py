@@ -32,3 +32,38 @@ def average_team(name: str, hands: str = "RLRLRRLRS") -> TeamCard:
     ]
     bullpen = [pitcher(f"{name}-RP{i}", "R" if i % 3 else "L", limit=25) for i in range(1, 8)]
     return TeamCard(name=name, lineup=lineup, starter=pitcher(f"{name}-SP"), bullpen=bullpen)
+
+
+def average_week_team(name: str):
+    """An average team for a sim week: five starters, the pen, four bench bats."""
+    from npl_sim.engine.workload import WeekTeam
+
+    card = average_team(name)
+    rotation = [pitcher(f"{name}-SP{i}", "R" if i % 2 else "L") for i in range(1, 6)]
+    bench = [hitter(f"{name}-BN{i}", bats="L" if i % 2 else "R") for i in range(1, 5)]
+    fields = {h.id: {pos} for h, pos in card.lineup if pos != "DH"}
+    fields.update(
+        {
+            f"{name}-BN1": {"C"},
+            f"{name}-BN2": {"1B", "2B", "3B", "SS"},
+            f"{name}-BN3": {"LF", "CF", "RF"},
+            f"{name}-BN4": {"1B", "LF", "RF"},
+        }
+    )
+    return WeekTeam(card=card, lineups={}, rotation=rotation, bench=bench, fields=fields)
+
+
+def busy_week(*teams) -> dict:
+    """MLB usage for a typical full week: regulars ~26 PA, bench ~8, each
+    starter one start (the first two two), relievers about 3 innings."""
+    pa, starts, relief = {}, {}, {}
+    for t in teams:
+        for h, _ in t.card.lineup:
+            pa[h.id] = 26
+        for h in t.bench:
+            pa[h.id] = 8
+        for i, p in enumerate(t.rotation):
+            starts[p.id] = 2 if i < 2 else 1
+        for p in t.card.bullpen:
+            relief[p.id] = 9
+    return {"pa": pa, "starts": starts, "relief_outs": relief}

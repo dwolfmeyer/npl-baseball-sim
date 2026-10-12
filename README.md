@@ -83,6 +83,18 @@ or from a set inning on when the spot's leverage index reaches a threshold.
 Defaults when the owner sets nothing: out after 6 runs, and from the 7th in
 spots of LI 2.0 or more. Each pitching change logs its reason.
 
+Weekly playing time (`engine/workload.py`, `play_week`): each player's sim
+week follows his real one. Hitters get 1.25x their MLB PA and start while
+they have 3 or more left; a hitter who can't is replaced by the bench player
+who fits his position with the most PA left, else a (AAA) stand-in at
+Scoresheet's penalty levels (`engine/replacement.py`). Starters get their MLB
+starts plus up to one carried from last week, in rotation order with four
+days' rest; with nobody able to start, the rested reliever with the most
+innings left opens a bullpen game. Relievers get 1.5x their MLB relief outs,
+no third day in a row, and a day off after 25 pitches (two after 40). Unused
+starts, the rotation turn and rest carry into next week. `npl_sim/playing_time.py`
+reads a real week from the pipeline's clean tables.
+
 Position eligibility (`npl_sim/eligibility.py`): 20 MLB games at a position
 last season or 10 this season, counted from box scores; players with no
 qualifying games yet fall back to their listed NPL position. Anyone can DH.
@@ -90,6 +102,7 @@ qualifying games yet fall back to their listed NPL position. Anyone can DH.
 ```sh
 npl-sim demo-game --seed 3 --plays scoring   # two league-average teams
 npl-sim demo-game --seed 3 --html game.html  # Gameday-style page: Box / Play-by-play
+npl-sim demo-week --seed 2                   # a week under the playing-time budget
 ```
 
 League structure lives in `config/league.yaml`. When divisions realign, add a

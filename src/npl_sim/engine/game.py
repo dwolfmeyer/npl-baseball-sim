@@ -101,6 +101,8 @@ class TeamCard:
     # When the starter (and the bulk arm after an opener) comes out, besides
     # his pitch limit: times through the order, runs allowed, leverage.
     hook: StarterHook = field(default_factory=StarterHook)
+    # Outs each pitcher may still get this week (workload.py); none = no cap.
+    outs_limit: dict[str, int] = field(default_factory=dict)
 
     @property
     def short(self) -> str:
@@ -207,6 +209,8 @@ class GameSim:
         p, card = side.pitcher, side.card
         if side.pitches >= p.pitch_limit + (15 if mid_inning else 0):
             return "pitch_count"
+        if p.id in card.outs_limit and side.pitcher_outs >= card.outs_limit[p.id]:
+            return "workload"
         if p.id == card.starter.id or p.id in card.follow:
             return card.hook.reason(
                 side.batters_faced,
