@@ -1,6 +1,6 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`, `demo-game`, `web`, `eligibility`, and the MLB data pipeline
-(`pull-week`, `backfill`, `check-calendar`, `sync-mlb`)."""
+`generate-schedule`, `demo-game`, `demo-week`, `sim-week`, `web`, `eligibility`, and the
+MLB data pipeline (`pull-week`, `backfill`, `check-calendar`, `sync-mlb`)."""
 
 from __future__ import annotations
 
@@ -62,6 +62,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="also print the play log: every play or scoring plays only",
     )
     demo.add_argument("--html", type=Path, help="write a Gameday-style game page here")
+
+    demo_week = sub.add_parser(
+        "demo-week", help="sim a week between two average teams under the playing-time budget"
+    )
+    demo_week.add_argument("--seed", type=int, default=1)
+
+    simw = sub.add_parser(
+        "sim-week",
+        help="sim a week between the test teams' saved lineup cards under the playing-time budget",
+    )
+    simw.add_argument("--seed", type=int, default=1)
+    simw.add_argument("--teams", nargs="*", help="team names (default: every team with a roster)")
+    simw.add_argument("--season", type=int, default=2026)
+    simw.add_argument("--week", type=int, help="use this MLB week's real usage (needs clean data)")
+    simw.add_argument("--clean-root", type=Path, default=Path("data/clean"))
+    simw.add_argument("--out", type=Path, help="write index.html and a page per game here")
+    simw.add_argument("--save", action="store_true", help="also save the games to the web app")
 
     elig = sub.add_parser(
         "eligibility",
@@ -165,6 +182,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.html:
             args.html.write_text(render_game(box, game_log(events)))
             print(f"\nWrote {args.html}")
+    elif args.cmd == "demo-week":
+        from npl_sim.engine.defaults import DEFAULT_ENV
+        from npl_sim.engine.sample import average_week_team, busy_week
+        from npl_sim.engine.workload import MlbWeek, play_week
+
+        teams = {n: average_week_team(n) for n in ("Away", "Home")}
+        usage = busy_week(*teams.values())
+        # Make the week interesting: a catcher who didn't play, a part-timer,
+        # a starter who skipped his turn.
+        usage["pa"].update({"Home-C": 0, "Home-1B": 8})
+        usage["starts"]["Home-SP3"] = 0
+        games = [(day, "Away", "Home") for day in range(7)]
+        result = play_week(teams, games, MlbWeek(**usage), DEFAULT_ENV, args.seed)
+        for g in result.games:
+            final = g["events"][-1]
+            print(f"Day {g['day']}: Away {final['away']}, Home {final['home']}")
+            for team in ("Away", "Home"):
+                m = g["moves"][team]
+                notes = [f"starter {m.starter}" + (" (bullpen game)" if m.bullpen_game else "")]
+                notes += [f"{r['into']} for {r['out']} at {r['position']}" for r in m.replaced]
+                if m.unavailable:
+                    notes.append("resting or used up: " + ", ".join(m.unavailable))
+                print(f"  {team}: " + "; ".join(notes))
+    elif args.cmd == "sim-week":
+        return _sim_week(args)
     elif args.cmd == "eligibility":
         from npl_sim.pipeline.http import Http
         from npl_sim.rosters import eligibility
@@ -181,6 +223,77 @@ def main(argv: Sequence[str] | None = None) -> int:
         uvicorn.run(create_app(), host=args.host, port=args.port)
     elif args.cmd in ("pull-week", "backfill", "check-calendar", "sync-mlb"):
         return _pipeline_command(args)
+    return 0
+
+
+def _sim_week(args: argparse.Namespace) -> int:
+    from npl_sim.engine.box import box_score
+    from npl_sim.playing_time import load_mlb_week
+    from npl_sim.reporting.week import standings, write_week
+    from npl_sim.rosters import eligibility as elig_data
+    from npl_sim.simweek import round_robin, sim_week
+    from npl_sim.web import lineup
+    from npl_sim.web.app import load_players
+    from npl_sim.web.store import Store
+
+    elig = elig_data.load(args.season)
+    rosters: dict[str, list] = {}
+    for p in load_players():
+        if p.is_active_mlb and p.mlb_id is not None:
+            rosters.setdefault(p.team, []).append(p)
+    teams = args.teams or sorted(rosters)
+    missing = [t for t in teams if t not in rosters]
+    if missing:
+        print(f"No roster for: {', '.join(missing)}")
+        return 1
+    store = Store()
+    cards = {}
+    for t in teams:
+        saved = store.load_card(t)
+        cards[t] = saved or lineup.default_card(rosters[t], elig)
+        print(f"{t}: {'saved lineup card' if saved else 'default lineup card (none saved)'}")
+    mlb = None
+    usage = f"a typical week at each player's {args.season} pace (full time if no data)"
+    if args.week is not None:
+        mlb = load_mlb_week(args.clean_root, args.season, args.week)
+        usage = f"real MLB usage from {args.season} week {args.week}"
+    schedule = round_robin(teams)
+    result = sim_week(cards, rosters, elig, schedule, mlb, args.seed)
+    print(f"Playing time: {usage}\n")
+    for g in result.games:
+        f = g["events"][-1]
+        print(f"Day {g['day'] + 1}: {g['away']} {f['away']}, {g['home']} {f['home']}")
+    print("\nTeam                       W  L  RS  RA")
+    for t, w, lo, rs, ra in standings(result):
+        print(f"{t:<26} {w:>2} {lo:>2} {rs:>3} {ra:>3}")
+    if args.out:
+        title = f"NPL test week ({args.season}" + (f", week {args.week})" if args.week else ")")
+        names = {str(p.mlb_id): p.name for r in rosters.values() for p in r}
+        subtitle = f"Playing time: {usage}. Seed {args.seed}."
+        index = write_week(result, args.out, title, subtitle, names)
+        print(f"\nWrote {index}")
+    if args.save:
+        for g in result.games:
+            box = box_score(g["events"])
+            starters = {
+                side: next(
+                    p["name"]
+                    for p in g["events"][0][side]["pitchers"]
+                    if p["id"] == g["moves"][g[side]].starter
+                )
+                for side in ("away", "home")
+            }
+            store.save_game(
+                {
+                    "away": g["away"],
+                    "home": g["home"],
+                    "seed": args.seed,
+                    "starters": starters,
+                    "runs": {"away": box.runs[g["away"]], "home": box.runs[g["home"]]},
+                    "events": g["events"],
+                }
+            )
+        print(f"Saved {len(result.games)} games to the web app")
     return 0
 
 
