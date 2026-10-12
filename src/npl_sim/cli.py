@@ -1,8 +1,10 @@
-"""Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`."""
+"""Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
+`generate-schedule`."""
 
 from __future__ import annotations
 
 import argparse
+import csv
 from collections.abc import Sequence
 from datetime import date
 
@@ -13,6 +15,11 @@ from npl_sim.db.seed import sync_alignment
 from npl_sim.league import load_league_file, team_slots
 from npl_sim.rosters.importer import get_or_create_week, import_rosters
 from npl_sim.rosters.sources import players_from_database, players_from_dump
+from npl_sim.schedule.calendar import load_calendar, sim_weeks
+from npl_sim.schedule.matchups import build_series
+from npl_sim.schedule.packer import pack
+from npl_sim.schedule.store import save_schedule
+from npl_sim.schedule.validate import validate
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -33,6 +40,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     rosters.add_argument("--week-start", type=date.fromisoformat, required=True, help="the Monday")
     rosters.add_argument("--from-dump", help="read a Django dumpdata export instead of the NPL DB")
     rosters.add_argument("--team", action="append", help="limit to these NPL teams (repeatable)")
+
+    sched = sub.add_parser("generate-schedule", help="build and validate a 162-game season")
+    sched.add_argument("--season", type=int, required=True)
+    sched.add_argument("--seed", type=int, default=0, help="solver seed")
+    sched.add_argument("--csv", help="also write the games to this CSV file")
+    sched.add_argument("--save", action="store_true", help="write weeks and games to the DB")
 
     args = parser.parse_args(argv)
     league_file = load_league_file()
@@ -61,6 +74,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         if report.unmatched_mlb_roster:
             print(f"FAILED: {len(report.unmatched_mlb_roster)} MLB Roster players lack an MLBAM ID")
             return 1
+    elif args.cmd == "generate-schedule":
+        alignment = league_file.for_season(args.season)
+        weeks = sim_weeks(load_calendar(args.season))
+        schedule = pack(build_series(alignment, args.season), weeks, seed=args.seed)
+        problems = validate(schedule, alignment, weeks)
+        for p in problems:
+            print(f"INVALID: {p}")
+        if problems:
+            return 1
+        print(f"Valid {args.season} schedule: {len(schedule)} series over {len(weeks)} weeks")
+        if args.csv:
+            with open(args.csv, "w", newline="") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(["week", "date", "away", "home", "series_games", "kind"])
+                for item in schedule:
+                    s = item.series
+                    for d in item.dates:
+                        writer.writerow([item.week, d, s.away, s.home, s.games, s.kind])
+            print(f"Wrote {args.csv}")
+        if args.save:
+            with Session(get_engine()) as session, session.begin():
+                sync_alignment(session, league_file, args.season)
+                n = save_schedule(session, args.season, weeks, schedule)
+            print(f"Saved {n} games")
     return 0
 
 

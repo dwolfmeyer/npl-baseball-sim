@@ -22,6 +22,24 @@ TEAMS_PER_DIVISION = 4
 class DivisionConfig(BaseModel):
     name: str
     teams: list[str]
+    # Two rival pairs who play 18; the other division pairs play 17.
+    # Defaults to the first two and last two teams as listed.
+    rivals: list[tuple[str, str]] | None = None
+
+    @model_validator(mode="after")
+    def _check_rivals(self) -> DivisionConfig:
+        if self.rivals is None:
+            return self
+        paired = [t for pair in self.rivals for t in pair]
+        if len(self.rivals) != 2 or sorted(paired) != sorted(self.teams):
+            raise ValueError(f"{self.name}: rivals must pair off all four division teams")
+        return self
+
+    def rival_pairs(self) -> list[tuple[str, str]]:
+        if self.rivals is not None:
+            return [tuple(p) for p in self.rivals]
+        t = self.teams
+        return [(t[0], t[1]), (t[2], t[3])]
 
 
 class LeagueConfig(BaseModel):
