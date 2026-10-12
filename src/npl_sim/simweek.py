@@ -1,0 +1,140 @@
+"""Sim a week of games between teams' saved lineup cards, for testing.
+
+Dave (2026-10-12): with the weekly playing-time budget in place, sim a full
+week between the test teams (Ducksnorts, McFlys, Frozen Ropes). Each team's
+lineup card becomes a `WeekTeam`: its batting orders vs LHP and RHP, the
+rotation with each slot's plan (pitch limit, hooks, opener and piggyback),
+the pen, bench and fielding from position eligibility. The week then runs
+under `engine.workload.play_week`, with each player's real MLB week when the
+pipeline's clean tables are at hand, or a sample full-time week otherwise.
+
+Player ability is still league average by handedness (the three-layer
+weekly blend is the rest of Milestone 7), so results test the machinery,
+not the rosters' talent.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from npl_sim.engine.defaults import DEFAULT_ENV
+from npl_sim.engine.sample import hitter
+from npl_sim.engine.workload import Carry, MlbWeek, WeekResult, WeekTeam, play_week
+from npl_sim.rosters.eligibility import Eligibility
+from npl_sim.rosters.npl_app import NplPlayer
+from npl_sim.web import lineup
+
+DAYS = 7
+
+
+def abbr(team: str) -> str:
+    return team.split()[-1][:3].upper()
+
+
+def week_team(
+    team: str, card: lineup.LineupCard, roster: list[NplPlayer], elig: Eligibility | None
+) -> WeekTeam:
+    """One team's week from its lineup card."""
+    slots = [i for i, pid in enumerate(card.rotation) if pid is not None]
+    if not slots:
+        raise ValueError(f"{team}'s lineup card has no rotation")
+
+    def build(slot: int, vs: str):
+        return lineup.team_card(team, abbr(team), card, roster, slot, vs, elig)
+
+    lineups = {vs: build(slots[0], vs).lineup for vs in ("L", "R")}
+    slot_cards = {}
+    for i in slots:
+        c = build(i, "R")
+        slot_cards[c.starter.id] = c
+    base = build(slots[0], "R")
+    starting = {h.id for lineup_ in lineups.values() for h, _ in lineup_}
+    by_id = {str(p.mlb_id): p for p in roster}
+    bench_ids = [
+        str(pid)
+        for pid in card.active
+        if str(pid) in by_id and not lineup.is_pitcher(by_id[str(pid)]) and str(pid) not in starting
+    ]
+    hitters = {h.id: h for lineup_ in lineups.values() for h, _ in lineup_}
+    bench = []
+    for pid in bench_ids:
+        # Build the bench hitter the way team_card builds lineup hitters.
+        if pid not in hitters:
+            hitters[pid] = _hitter(by_id[pid], elig)
+        bench.append(hitters[pid])
+    fields = {
+        str(p.mlb_id): lineup.fielding(p, elig)[0]
+        for p in roster
+        if not lineup.is_pitcher(p) and p.mlb_id is not None
+    }
+    return WeekTeam(
+        card=base,
+        lineups=lineups,
+        rotation=[c.starter for c in slot_cards.values()],
+        bench=bench,
+        fields=fields,
+        slot_cards=slot_cards,
+    )
+
+
+def _hitter(p: NplPlayer, elig: Eligibility | None):
+    """A bench hitter's card, built the way team_card builds lineup hitters."""
+    rec = elig.players.get(p.mlb_id) if elig else None
+    bats = rec.bats if rec and rec.bats in ("L", "R", "S") else "R"
+    return replace(hitter(str(p.mlb_id), bats=bats), name=p.name)
+
+
+def round_robin(teams: list[str], days: int = DAYS) -> list[tuple[int, str, str]]:
+    """A round robin for a test week: each day the teams pair up (one sits
+    when the count is odd), rotating partners and home field."""
+    names = list(teams) + ([None] if len(teams) % 2 else [])
+    n = len(names)
+    games = []
+    for day in range(days):
+        r = day % (n - 1)
+        order = [names[0]] + names[1:][r:] + names[1:][:r]
+        for i in range(n // 2):
+            a, b = order[i], order[n - 1 - i]
+            if a is None or b is None:
+                continue
+            away, home = (a, b) if (day // (n - 1) + i) % 2 else (b, a)
+            games.append((day, away, home))
+    return games
+
+
+def sample_mlb_week(teams: dict[str, WeekTeam]) -> MlbWeek:
+    """A normal full week when real data isn't at hand: starters in the
+    lineup about 26 PA, bench 8, the first two rotation spots two starts and
+    the rest one, relievers about three innings."""
+    pa, starts, relief = {}, {}, {}
+    for t in teams.values():
+        for lineup_ in t.lineups.values():
+            for h, _ in lineup_:
+                pa[h.id] = 26
+        for h in t.bench:
+            pa.setdefault(h.id, 8)
+        for i, p in enumerate(t.rotation):
+            starts[p.id] = 2 if i < 2 else 1
+        for c in [t.card, *t.slot_cards.values()]:
+            for p in c.bullpen:
+                if p.id not in starts:
+                    relief[p.id] = 9
+    return MlbWeek(pa=pa, starts=starts, relief_outs=relief)
+
+
+def sim_week(
+    cards: dict[str, lineup.LineupCard],
+    rosters: dict[str, list[NplPlayer]],
+    elig: Eligibility | None,
+    schedule: list[tuple[int, str, str]],
+    mlb_week: MlbWeek | None,
+    seed: int,
+    carry: dict[str, Carry] | None = None,
+    env=DEFAULT_ENV,
+) -> WeekResult:
+    """Play a week between saved lineup cards (keyed by team name).
+    `mlb_week` None plays a sample full-time week. Each game's events are
+    simulate_game's, so box scores and game pages render as usual."""
+    teams = {name: week_team(name, cards[name], rosters[name], elig) for name in cards}
+    mlb = mlb_week if mlb_week is not None else sample_mlb_week(teams)
+    return play_week(teams, schedule, mlb, env, seed, carry)

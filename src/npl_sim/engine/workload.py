@@ -173,13 +173,17 @@ class WeekTeam:
     rotation: list[Pitcher]
     bench: list[Hitter] = field(default_factory=list)
     fields: dict[str, set[str]] = field(default_factory=dict)
+    # Per-starter cards (by starter id) from his rotation slot's plan.
+    slot_cards: dict[str, TeamCard] = field(default_factory=dict)
 
     @property
     def players(self) -> set[str]:
         hitters = [h for lineup in self.lineups.values() for h, _ in lineup]
         hitters += [h for h, _ in self.card.lineup] + self.bench
         hitters += [s.player for s in self.card.defensive_subs]
-        return {p.id for p in hitters + self.rotation + self.card.bullpen}
+        arms = self.rotation + self.card.bullpen
+        arms += [p for c in self.slot_cards.values() for p in c.bullpen]
+        return {p.id for p in hitters + arms}
 
 
 @dataclass
@@ -208,8 +212,20 @@ def game_card(
 ) -> tuple[TeamCard, Moves]:
     """The engine's card for one game after this week's playing time, with
     `starter` from next_starter (None = a bullpen game)."""
-    card = team.card
-    relievers = [p for p in card.bullpen if state.can_relieve(p.id, day)]
+    # The starter's own rotation slot can carry its pitch limit, hook, an
+    # opener's piggyback and the pen built around it.
+    card = team.slot_cards.get(starter.id, team.card) if starter else team.card
+    if starter is not None:
+        starter = card.starter if card.starter.id == starter.id else starter
+
+    def available(p: Pitcher) -> bool:
+        if p.id in card.follow:  # a piggyback: a starter's budget or a reliever's
+            return state.rested(p.id, day) and (
+                state.outs_left.get(p.id, 0) > 0 or state.starts_left.get(p.id, 0) > 0
+            )
+        return state.can_relieve(p.id, day)
+
+    relievers = [p for p in card.bullpen if available(p)]
     moves = Moves(starter="")
     moves.unavailable = [p.id for p in card.bullpen if p not in relievers]
     if starter is None:
@@ -240,7 +256,11 @@ def game_card(
             {"out": hitter.id, "into": sub.id, "position": pos, "standin": standin}
         )
 
-    outs_limit = {p.id: state.outs_left.get(p.id, 0) for p in relievers}
+    outs_limit = {
+        p.id: state.outs_left.get(p.id, 0)
+        for p in relievers
+        if p.id not in card.follow and not p.id.startswith("AAA-")
+    }
     game = replace(
         card,
         lineup=lineup,
