@@ -54,3 +54,16 @@ def test_out_of_position_shows_in_the_box_and_costs_runs():
         for swap in (False, True)
     }
     assert runs[True] > runs[False]
+
+
+def test_zimmerman_pairs_keep_moves_asymmetric():
+    # 2B -> 1B costs little; 1B -> 2B costs a lot (Zimmerman, 2015).
+    assert rating_at({"2B": 0.0}, "1B") > -2 > -8 > rating_at({"1B": 0.0}, "2B")
+    # Center is much harder than the corners; short a little harder than second.
+    assert rating_at({"LF": 0.0}, "CF") < -10 and rating_at({"CF": 0.0}, "RF") > 0
+
+
+def test_catcher_out_from_behind_the_plate_pays():
+    catcher = {"C": 0.0}
+    assert rating_at(catcher, "3B") < -3 and rating_at(catcher, "LF") < -6
+    assert -1 < rating_at(catcher, "1B") <= 0

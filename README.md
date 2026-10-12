@@ -106,9 +106,11 @@ page with standings and who sat or filled in, plus a Gameday page per game;
 Out-of-position defense (`engine/fielding.py`): each hitter carries his
 fielding value at the positions he's experienced at (`Hitter.positions`).
 Anywhere else, Tango's defensive spectrum (C +8, CF +5, SS +4, 2B 0, 3B -1,
-LF/RF -4, 1B -8 runs per 600 BIP) sets the cost: moving down keeps half the
-gap, moving up loses all of it, plus an experience penalty and more for
-crossing infield/outfield or catching. The fielders' values move hit rates on
+LF/RF -4, 1B -8 runs per 600 BIP), averaged with Zimmerman's measured
+position-pair differences (2015) where he has them, sets the cost: moving down
+keeps half the gap, moving up loses all of it, plus an experience penalty and
+more for crossing infield/outfield or catching. A catcher moving out gets no
+credit for the catcher's spot. The fielders' values move hit rates on
 the ball types they handle; the box score lists who played out of position.
 
 Position eligibility (`npl_sim/eligibility.py`): 20 MLB games at a position
