@@ -13,7 +13,10 @@
     </ul>
     {% endif %}
   </div>
-  <button class="btn" type="submit" {% if not check.ok %}disabled{% endif %}>Save lineup card</button>
+  <div class="actions">
+    <button class="btn secondary" type="submit" formaction="/teams/{{ team_slug }}/lineup/autofill" data-autofill title="Fill the batting orders, rotation and bullpen from the active players by eligibility and MLB games">Autofill</button>
+    <button class="btn" type="submit" {% if not check.ok %}disabled{% endif %}>Save lineup card</button>
+  </div>
 </div>
 
 <div class="grid2">
@@ -31,15 +34,15 @@
     <span class="num">{{ i }}</span>
     <select class="who" id="{{ side }}_player_{{ i }}" name="{{ side }}_player_{{ i }}" aria-label="Batter {{ i }} {{ label }}">
       <option value="">—</option>
-      {% for h in hitters %}{% if h.mlb_id in active or h.mlb_id == pid %}
+      {% for h in hitters %}{% if (h.mlb_id in active and h.mlb_id not in in_order) or h.mlb_id == pid %}
       <option value="{{ h.mlb_id }}" {% if h.mlb_id == pid %}selected{% endif %}>{{ h.name }} · {{ fields[h.mlb_id].positions | join(" ") or "DH" }}</option>
       {% endif %}{% endfor %}
     </select>
     {% set eligible = fields[pid].positions if pid in fields else positions %}
     <select class="pos" id="{{ side }}_pos_{{ i }}" name="{{ side }}_pos_{{ i }}" aria-label="Position {{ i }} {{ label }}">
-      {% for p in positions %}{% if p in eligible or p == "DH" or p == pos %}
-      <option {% if p == pos %}selected{% endif %}>{{ p }}</option>
-      {% endif %}{% endfor %}
+      {% for p in positions %}
+      <option value="{{ p }}" {% if p == pos %}selected{% endif %}>{{ p }}{% if pid and p != "DH" and p not in eligible %} · out of pos{% endif %}</option>
+      {% endfor %}
     </select>
     <span class="moves">
       <button type="button" class="mv" data-move="-1" aria-label="Move batter {{ i }} up">▲</button>
@@ -60,10 +63,11 @@
 
 <section class="card">
   <h2>Rotation</h2>
-  <p class="muted small">Each starter goes until his pitch limit or his times-through-the-order hook. An opener pitches the first inning or so before the starter takes over; a piggyback follows the starter for bulk innings.</p>
+  <p class="muted small">Each starter goes until his pitch limit or the time through the order you pull him after. Check Opener to have the listed pitcher go an inning or so, then pick the piggyback who pitches the bulk innings after him (up to the pitch limit).</p>
   {% set rotation_ids = card.rotation | reject("none") | list %}
+  {% set planned = card.plans | map(attribute="piggyback") | reject("none") | list %}
   <div class="wrap"><table class="rotation">
-    <tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Hook</th><th>Opener</th><th>Piggyback</th></tr>
+    <tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Pull after</th><th>Opener</th><th>Piggyback</th></tr>
     {% for i in range(rotation_size) %}
     {% set pid = card.rotation[i] if i < card.rotation|length else None %}
     {% set plan = card.plan(i) %}
@@ -71,25 +75,23 @@
       <td>{{ i + 1 }}</td>
       <td><select id="sp_{{ i + 1 }}" name="sp_{{ i + 1 }}" aria-label="Starter {{ i + 1 }}">
         <option value="">—</option>
-        {% for a in arms %}{% if a.mlb_id in active or a.mlb_id == pid %}
+        {% for a in arms %}{% if (a.mlb_id in active and a.mlb_id not in rotation_ids and a.mlb_id not in planned) or a.mlb_id == pid %}
         <option value="{{ a.mlb_id }}" {% if a.mlb_id == pid %}selected{% endif %}>{{ a.name }} ({{ a.position }})</option>
         {% endif %}{% endfor %}
       </select></td>
       <td><select id="sp_limit_{{ i + 1 }}" name="sp_limit_{{ i + 1 }}" aria-label="Pitch limit for starter {{ i + 1 }}">
         {% for n in pitch_limits %}<option {% if n == plan.pitch_limit %}selected{% endif %}>{{ n }}</option>{% endfor %}
       </select></td>
-      <td><select id="sp_tto_{{ i + 1 }}" name="sp_tto_{{ i + 1 }}" aria-label="Times through the order hook for starter {{ i + 1 }}">
+      <td><select id="sp_tto_{{ i + 1 }}" name="sp_tto_{{ i + 1 }}" aria-label="Pull starter {{ i + 1 }}">
         {% for n, text in tto_hooks.items() %}<option value="{{ n }}" {% if n == plan.tto_hook %}selected{% endif %}>{{ text }}</option>{% endfor %}
       </select></td>
-      {% for what in ("opener", "piggyback") %}
-      {% set chosen = plan[what] %}
-      <td><select id="sp_{{ what }}_{{ i + 1 }}" name="sp_{{ what }}_{{ i + 1 }}" aria-label="{{ what|capitalize }} for starter {{ i + 1 }}">
+      <td><input type="checkbox" id="sp_opener_{{ i + 1 }}" name="sp_opener_{{ i + 1 }}" value="1" aria-label="Starter {{ i + 1 }} is an opener" {% if plan.opener %}checked{% endif %}></td>
+      <td><select id="sp_piggyback_{{ i + 1 }}" name="sp_piggyback_{{ i + 1 }}" aria-label="Piggyback for starter {{ i + 1 }}" {% if not plan.opener %}disabled title="Check Opener to add a piggyback"{% endif %}>
         <option value="">None</option>
-        {% for a in arms %}{% if (a.mlb_id in active and a.mlb_id not in rotation_ids) or a.mlb_id == chosen %}
-        <option value="{{ a.mlb_id }}" {% if a.mlb_id == chosen %}selected{% endif %}>{{ a.name }}</option>
+        {% for a in arms %}{% if (a.mlb_id in active and a.mlb_id not in rotation_ids and a.mlb_id not in planned) or a.mlb_id == plan.piggyback %}
+        <option value="{{ a.mlb_id }}" {% if a.mlb_id == plan.piggyback %}selected{% endif %}>{{ a.name }}</option>
         {% endif %}{% endfor %}
       </select></td>
-      {% endfor %}
     </tr>
     {% endfor %}
   </table></div>
@@ -119,7 +121,52 @@
 </div>
 
 <section class="card">
-  <h2>Active roster</h2>
+  <h2>Defensive replacements</h2>
+  <p class="muted small">Bring a bench player in late for defense. Leave "Replaces" on "Whoever plays there" to sub for anyone at that position, or pick one starter to sub only for him. Saved on the card; the engine makes the switch once its substitution logic lands.</p>
+  {% set starting = card.orders.values() | map("map", attribute=0) | map("list") | sum(start=[]) %}
+  {% set sub_ids = card.subs | map(attribute="player") | list %}
+  {% set rhp_ids = card.orders.get("rhp", []) | map(attribute=0) | list %}
+  {% set lhp_ids = card.orders.get("lhp", []) | map(attribute=0) | list %}
+  <div class="wrap"><table class="rotation">
+    <tr><th>Replacement</th><th>Position</th><th>From</th><th>Replaces</th><th>Only when leading</th></tr>
+    {% for i in range(sub_rows) %}
+    {% set sub = card.subs[i] if i < card.subs|length else None %}
+    <tr>
+      <td><select id="sub_player_{{ i + 1 }}" name="sub_player_{{ i + 1 }}" aria-label="Defensive replacement {{ i + 1 }}">
+        <option value="">None</option>
+        {% for h in hitters %}{% if (h.mlb_id in active and h.mlb_id not in sub_ids and not (h.mlb_id in rhp_ids and h.mlb_id in lhp_ids)) or (sub and h.mlb_id == sub.player) %}
+        <option value="{{ h.mlb_id }}" {% if sub and h.mlb_id == sub.player %}selected{% endif %}>{{ h.name }} · {{ fields[h.mlb_id].positions | join(" ") or "DH" }}</option>
+        {% endif %}{% endfor %}
+      </select></td>
+      <td><select id="sub_pos_{{ i + 1 }}" name="sub_pos_{{ i + 1 }}" aria-label="Position for replacement {{ i + 1 }}">
+        {% set eligible = fields[sub.player].positions if sub and sub.player in fields else positions %}
+        {% for p in positions[:-1] %}
+        <option value="{{ p }}" {% if sub and p == sub.position %}selected{% endif %}>{{ p }}{% if sub and p not in eligible %} · out of pos{% endif %}</option>
+        {% endfor %}
+      </select></td>
+      <td><select id="sub_inning_{{ i + 1 }}" name="sub_inning_{{ i + 1 }}" aria-label="First inning for replacement {{ i + 1 }}">
+        {% for n in sub_innings %}<option value="{{ n }}" {% if (sub.from_inning if sub else 9) == n %}selected{% endif %}>{{ n }}th</option>{% endfor %}
+      </select></td>
+      <td><select id="sub_replaces_{{ i + 1 }}" name="sub_replaces_{{ i + 1 }}" aria-label="Who replacement {{ i + 1 }} replaces">
+        <option value="">Whoever plays there</option>
+        {% for h in hitters %}{% if h.mlb_id in starting and (not sub or h.mlb_id != sub.player) %}
+        <option value="{{ h.mlb_id }}" {% if sub and h.mlb_id == sub.replaces %}selected{% endif %}>{{ h.name }}</option>
+        {% endif %}{% endfor %}
+      </select></td>
+      <td><input type="checkbox" id="sub_leading_{{ i + 1 }}" name="sub_leading_{{ i + 1 }}" value="1" aria-label="Only when leading, replacement {{ i + 1 }}" {% if not sub or sub.only_when_leading %}checked{% endif %}></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</section>
+
+<section class="card">
+  <div class="head-row">
+    <h2>Active roster</h2>
+    <span class="actions">
+      <button type="button" class="btn secondary small-btn" data-select-all="1">Select all</button>
+      <button type="button" class="btn secondary small-btn" data-select-all="0">Clear</button>
+    </span>
+  </div>
   <p class="muted small">Up to {{ active_limit }} players. Hitters are eligible at a position with 20 MLB games there last season or 10 this season; anyone can DH. Anyone else can still play there, out of position.</p>
   <div class="grid2">
   <div class="wrap"><table>
