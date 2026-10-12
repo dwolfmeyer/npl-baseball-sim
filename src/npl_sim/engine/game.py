@@ -32,6 +32,9 @@ class Hitter:
     # Fielding value (runs per 600 BIP vs the average there) at each position
     # he's experienced at; empty = average anywhere. See fielding.py.
     positions: dict[str, float] = field(default_factory=dict, hash=False, compare=False)
+    # Throwing arm, about -2..+2: pop time for a catcher, arm strength for an
+    # outfielder (talent/fielding.py). Holds runners in fielding.team_defense.
+    arm: float = 0.0
 
     def side_vs(self, throws: str) -> str:
         if self.bats == "S":
