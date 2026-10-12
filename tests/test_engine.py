@@ -182,4 +182,4 @@ def test_switch_hitter_bats_opposite_the_pitcher():
 
 def test_format_box_renders():
     text = format_box(box_score(simulate_game(AWAY, HOME, DEFAULT_ENV, 1), "Away", "Home"))
-    assert "Away batting" in text and "Home pitching" in text
+    assert "Away Batters" in text and "Home Pitchers" in text
