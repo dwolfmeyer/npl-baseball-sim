@@ -63,11 +63,11 @@
 
 <section class="card">
   <h2>Rotation</h2>
-  <p class="muted small">Each starter goes until his pitch limit or the time through the order you pull him after. Check Opener to have the listed pitcher go an inning or so, then pick the piggyback who pitches the bulk innings after him (up to the pitch limit).</p>
+  <p class="muted small">Each starter comes out at the first of: his pitch limit, the time through the order you pull him after, the runs allowed you set, or a big spot (leverage index at or above your setting, from that inning on). Check Opener to have the listed pitcher go an inning or so, then pick the piggyback who pitches the bulk innings after him (up to the pitch limit).</p>
   {% set rotation_ids = card.rotation | reject("none") | list %}
   {% set planned = card.plans | map(attribute="piggyback") | reject("none") | list %}
   <div class="wrap"><table class="rotation">
-    <thead><tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Pull after</th><th>Opener</th><th>Piggyback</th></tr></thead>
+    <thead><tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Pull after</th><th>Runs allowed</th><th>Big spots</th><th>From</th><th>Opener</th><th>Piggyback</th></tr></thead>
     <tbody class="sp-list">
     {% for i in range(rotation_size) %}
     {% set pid = card.rotation[i] if i < card.rotation|length else None %}
@@ -85,6 +85,15 @@
       </select></td>
       <td><select id="sp_tto_{{ i + 1 }}" name="sp_tto_{{ i + 1 }}" aria-label="Pull starter {{ i + 1 }}">
         {% for n, text in tto_hooks.items() %}<option value="{{ n }}" {% if n == plan.tto_hook %}selected{% endif %}>{{ text }}</option>{% endfor %}
+      </select></td>
+      <td><select id="sp_runs_{{ i + 1 }}" name="sp_runs_{{ i + 1 }}" aria-label="Pull starter {{ i + 1 }} after runs allowed">
+        {% for n, text in run_hooks.items() %}<option value="{{ n if n else 'off' }}" {% if n == plan.max_runs %}selected{% endif %}>{{ text }}</option>{% endfor %}
+      </select></td>
+      <td><select id="sp_li_{{ i + 1 }}" name="sp_li_{{ i + 1 }}" aria-label="Pull starter {{ i + 1 }} in big spots">
+        {% for n, text in leverage_hooks.items() %}<option value="{{ n if n else 'off' }}" {% if n == plan.leverage %}selected{% endif %}>{{ text }}</option>{% endfor %}
+      </select></td>
+      <td><select id="sp_li_inning_{{ i + 1 }}" name="sp_li_inning_{{ i + 1 }}" aria-label="Big spots from inning, starter {{ i + 1 }}" {% if plan.leverage is none %}disabled{% endif %}>
+        {% for n in leverage_innings %}<option value="{{ n }}" {% if n == plan.leverage_from_inning %}selected{% endif %}>{{ n }}th</option>{% endfor %}
       </select></td>
       <td><input type="checkbox" id="sp_opener_{{ i + 1 }}" name="sp_opener_{{ i + 1 }}" value="1" aria-label="Starter {{ i + 1 }} is an opener" {% if plan.opener %}checked{% endif %}></td>
       <td><select id="sp_piggyback_{{ i + 1 }}" name="sp_piggyback_{{ i + 1 }}" aria-label="Piggyback for starter {{ i + 1 }}" {% if not plan.opener %}disabled title="Check Opener to add a piggyback"{% endif %}>

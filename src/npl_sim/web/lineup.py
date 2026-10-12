@@ -20,6 +20,12 @@ from npl_sim.engine.alignment import AlignmentRule
 from npl_sim.engine.bullpen import ReliefUsage
 from npl_sim.engine.game import DefensiveSub as EngineSub
 from npl_sim.engine.game import TeamCard
+from npl_sim.engine.hooks import (
+    DEFAULT_LEVERAGE,
+    DEFAULT_LEVERAGE_INNING,
+    DEFAULT_MAX_RUNS,
+    StarterHook,
+)
 from npl_sim.engine.sample import hitter, pitcher
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
@@ -40,6 +46,11 @@ TTO_HOOKS = {
     2: "After 2nd time through",
     3: "After 3rd time through",
 }
+# Pull the starter once he's been charged with this many runs (None = off).
+RUN_HOOKS = {None: "Off", **{n: f"{n} runs" for n in range(3, 9)}}
+# Pull him in a big spot: leverage index at or above this (None = off).
+LEVERAGE_HOOKS = {None: "Off", 1.5: "LI 1.5+", 2.0: "LI 2.0+", 2.5: "LI 2.5+"}
+LEVERAGE_INNINGS = range(5, 9)
 OPENER_PITCHES = 25
 DEFENSE_RULES = {
     "infield_in": "Infield in with a runner on 3rd and fewer than 2 outs, "
@@ -81,6 +92,17 @@ class StarterPlan:
     # pitches the bulk innings after him (the piggyback only applies then).
     opener: bool = False
     piggyback: int | None = None
+    max_runs: int | None = DEFAULT_MAX_RUNS  # pull once charged with this many runs
+    leverage: float | None = DEFAULT_LEVERAGE  # pull in a spot of this LI or more...
+    leverage_from_inning: int = DEFAULT_LEVERAGE_INNING  # ...from this inning on
+
+    def hook(self) -> StarterHook:
+        return StarterHook(
+            times_through=self.tto_hook,
+            max_runs=self.max_runs,
+            leverage=self.leverage,
+            leverage_from_inning=self.leverage_from_inning,
+        )
 
     def __post_init__(self) -> None:
         # Cards saved before the opener was a checkbox stored a pitcher id.
@@ -187,6 +209,17 @@ class LineupCard:
             value = get(key)
             return int(value) if value.isdigit() else None
 
+        def choice(key: str, options, kind, default):
+            """A dropdown value: "off" is None, a missing field is the default."""
+            value = get(key)
+            if value == "off":
+                return None
+            try:
+                value = kind(value)
+            except ValueError:
+                return default
+            return value if value in options else default
+
         active = form.getlist("active") if hasattr(form, "getlist") else form.get("active", [])
         orders = {
             side: [(pid(f"{side}_player_{i}"), get(f"{side}_pos_{i}")) for i in range(1, 10)]
@@ -199,6 +232,11 @@ class LineupCard:
                 tto_hook=pid(f"sp_tto_{i}") or 0,
                 opener=bool(get(f"sp_opener_{i}")),
                 piggyback=pid(f"sp_piggyback_{i}") if get(f"sp_opener_{i}") else None,
+                max_runs=choice(f"sp_runs_{i}", RUN_HOOKS, int, DEFAULT_MAX_RUNS),
+                leverage=choice(f"sp_li_{i}", LEVERAGE_HOOKS, float, DEFAULT_LEVERAGE),
+                leverage_from_inning=choice(
+                    f"sp_li_inning_{i}", LEVERAGE_INNINGS, int, DEFAULT_LEVERAGE_INNING
+                ),
             )
             for i in range(1, ROTATION_SIZE + 1)
         ]
@@ -585,6 +623,7 @@ def team_card(
         abbr=abbr,
         alignment_rules=alignment_rules,
         defensive_subs=defensive_subs,
+        hook=plan.hook(),
         relief=relief,
         # The piggyback follows the opener before anyone is picked by leverage.
         follow=tuple(str(a.id) for a in bulk),
