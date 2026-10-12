@@ -39,5 +39,18 @@ npl-sim import-rosters --season 2026 --week 1 --week-start 2026-03-23 \
 
 The command fails if any MLB Roster player has no MLBAM ID.
 
+### Schedule
+
+```sh
+npl-sim generate-schedule --season 2026 --csv schedule-2026.csv --save
+```
+
+Builds MLB's balanced 162-game mix from the league config (rival 18,
+division 17, own league 8, interleague 4 as home-and-home 2-game sets and 3
+vs two rotating opponents), gives every team 81 home games, packs the series
+into the Monday-Sunday weeks in `config/calendar.yaml` with OR-Tools CP-SAT,
+and validates the result before saving. Division rivals default to the first
+two and last two teams listed; set `rivals` on a division to change them.
+
 League structure lives in `config/league.yaml`. When divisions realign, add a
 new alignment block with its `from_season`; past seasons keep their divisions.
