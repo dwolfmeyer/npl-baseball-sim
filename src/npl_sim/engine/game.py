@@ -51,6 +51,32 @@ class Pitcher:
         return self.vs_lhb if side == "L" else self.vs_rhb
 
 
+FIELD_POSITIONS = ("C", "1B", "2B", "3B", "SS", "LF", "CF", "RF")
+
+
+@dataclass(frozen=True)
+class DefensiveSub:
+    """A late-game defensive replacement from the bench.
+
+    At the top of each half inning the team takes the field from `from_inning`
+    on (and only while leading, unless `only_when_leading` is off), the sub
+    comes in at `position`, taking the batting-order slot of `replaces` (a
+    starter's id) or, when that is None, of whoever is playing `position`.
+    If `replaces` plays somewhere else, the player at `position` moves over to
+    the replaced player's spot. Each sub is used at most once.
+    """
+
+    player: Hitter
+    position: str
+    from_inning: int = 9
+    only_when_leading: bool = True
+    replaces: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.position not in FIELD_POSITIONS:
+            raise ValueError(f"defensive sub needs a field position, not {self.position!r}")
+
+
 @dataclass
 class TeamCard:
     """What the engine needs from one team for one game."""
@@ -65,6 +91,7 @@ class TeamCard:
     alignment_rules: tuple[AlignmentRule, ...] = ()
     steal_aggressiveness: float = 1.0  # 0 = never run, 1 = normal, 2 = aggressive
     abbr: str = ""  # short name for scores in the play log; defaults to the first 3 letters
+    defensive_subs: tuple[DefensiveSub, ...] = ()
 
     @property
     def short(self) -> str:
@@ -88,6 +115,9 @@ class _Side:
     batters_faced: int = 0
     runs: int = 0
     pitchers_used: list[str] = field(default_factory=list)
+    lineup: list[tuple[Hitter, str]] = field(default_factory=list)  # this game's, after subs
+    subs_used: set[int] = field(default_factory=set)
+    removed: set[str] = field(default_factory=set)  # players who left the game
 
 
 class GameSim:
@@ -100,6 +130,7 @@ class GameSim:
         self.sides = {"away": _Side(away), "home": _Side(home)}
         for side in self.sides.values():
             side.pitcher = side.card.starter
+            side.lineup = list(side.card.lineup)
             side.pitchers_used.append(side.card.starter.id)
         self.events: list[dict] = []
         self.inning = 1
@@ -160,6 +191,10 @@ class GameSim:
                 ],
                 "pitchers": [{"id": p.id, "name": p.name, "throws": p.throws} for p in pitchers],
                 "starter": card.starter.id,
+                "bench": [
+                    {"id": s.player.id, "name": s.player.name, "bats": s.player.bats}
+                    for s in card.defensive_subs
+                ],
             }
 
         self._log(
@@ -199,10 +234,11 @@ class GameSim:
         self.bases = [None, None, None]
         side = self._batting()
         start_runs = side.runs
+        self._defensive_subs()
         self._maybe_change_pitcher(mid_inning=False)
         if self.inning > 9 and self.env.auto_runner:
             # The batter before this inning's leadoff man starts on second.
-            prev = side.card.lineup[(side.slot - 1) % len(side.card.lineup)][0]
+            prev = side.lineup[(side.slot - 1) % len(side.lineup)][0]
             self.bases[1] = Runner(prev, self._fielding().pitcher.id, earned=False)
             self._log("auto_runner", runner=prev.id)
         while self.outs < 3:
@@ -216,6 +252,43 @@ class GameSim:
                 self._maybe_change_pitcher(mid_inning=True)
         self._log("half_end", left_on_base=sum(r is not None for r in self.bases))
         self.line["away" if self.half == "top" else "home"].append(side.runs - start_runs)
+
+    def _defensive_subs(self) -> None:
+        side = self._fielding()
+        lead = side.runs - self._batting().runs
+        for i, sub in enumerate(side.card.defensive_subs):
+            if i in side.subs_used or self.inning < sub.from_inning:
+                continue
+            if sub.only_when_leading and lead <= 0:
+                continue
+            ids = [h.id for h, _ in side.lineup]
+            if sub.player.id in ids or sub.player.id in side.removed:
+                continue
+            at_pos = next((j for j, (_, p) in enumerate(side.lineup) if p == sub.position), None)
+            target = ids.index(sub.replaces) if sub.replaces in ids else None
+            if sub.replaces is not None and target is None:
+                continue  # that starter is already out of the game
+            target = at_pos if target is None else target
+            if target is None:
+                continue
+            out, out_pos = side.lineup[target]
+            moved = None
+            if at_pos is not None and at_pos != target:
+                mover = side.lineup[at_pos][0]
+                side.lineup[at_pos] = (mover, out_pos)
+                moved = {"player": mover.id, "position": out_pos}
+            side.lineup[target] = (sub.player, sub.position)
+            side.subs_used.add(i)
+            side.removed.add(out.id)
+            self._log(
+                "defensive_sub",
+                team=side.card.name,
+                into=sub.player.id,
+                out=out.id,
+                position=sub.position,
+                slot=target,
+                moved=moved,
+            )
 
     def _walkoff(self) -> bool:
         return (
@@ -251,8 +324,8 @@ class GameSim:
 
     def _plate_appearance(self) -> None:
         offense, defense = self._batting(), self._fielding()
-        hitter, pos = offense.card.lineup[offense.slot]
-        offense.slot = (offense.slot + 1) % len(offense.card.lineup)
+        hitter, pos = offense.lineup[offense.slot]
+        offense.slot = (offense.slot + 1) % len(offense.lineup)
         pitcher = defense.pitcher
         side = hitter.side_vs(pitcher.throws)
 

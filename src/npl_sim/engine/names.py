@@ -25,10 +25,17 @@ class Team:
     lineup: list[dict]
     pitchers: list[dict]
     starter: str
-    positions: dict[str, str] = field(default_factory=dict)  # position -> player id
+    bench: list[dict] = field(default_factory=list)
+    positions: dict[str, str] = field(default_factory=dict)  # position -> player id, now
 
     def __post_init__(self) -> None:
         self.positions = {p["position"]: p["id"] for p in self.lineup}
+
+    def substitute(self, e: dict) -> None:
+        """Apply a `defensive_sub` event to who plays where."""
+        if e.get("moved"):
+            self.positions[e["moved"]["position"]] = e["moved"]["player"]
+        self.positions[e["position"]] = e["into"]
 
 
 class Roster:
@@ -42,7 +49,7 @@ class Roster:
         self.full: dict[str, str] = {}
         self.short: dict[str, str] = {}
         for team in self.teams.values():
-            people = team.lineup + team.pitchers
+            people = team.lineup + team.pitchers + team.bench
             for p in people:
                 self.full[p["id"]] = p["name"]
             lasts = Counter(_last(p["name"]) for p in people)

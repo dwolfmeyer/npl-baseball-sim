@@ -24,7 +24,8 @@ TOTAL_BASES = {"1B": 1, "2B": 2, "3B": 3, "HR": 4}
 @dataclass
 class BattingLine:
     name: str = ""
-    position: str = ""
+    position: str = ""  # every spot he played, in order, e.g. "LF-RF"
+    substitute: bool = False  # entered during the game (listed under the starter he followed)
     pa: int = 0
     ab: int = 0
     r: int = 0
@@ -134,9 +135,11 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
 
     batting: dict[str, dict[str, BattingLine]] = {s: {} for s in sides}
     pitching: dict[str, dict[str, PitchingLine]] = {s: {} for s in sides}
+    slots: dict[str, list[list[str]]] = {s: [] for s in sides}  # batting-order slots
     for s in sides:
         for p in roster.teams[s].lineup:
             batting[s][p["id"]] = BattingLine(roster.short[p["id"]], p["position"])
+            slots[s].append([p["id"]])
     hits = dict.fromkeys(sides, 0)
     errors = dict.fromkeys(sides, 0)
     lob = dict.fromkeys(sides, 0)
@@ -276,6 +279,15 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
                 pit(defense, e["pitcher"]).outs += 1
                 stints[defense][-1].outs += 1
                 notes[offense]["CS"].append((line.name, f"{base} by {battery}"))
+        elif e["type"] == "defensive_sub":
+            side = roster.side_of(e["team"])
+            roster.teams[side].substitute(e)
+            batting[side][e["into"]] = BattingLine(
+                roster.short[e["into"]], e["position"], substitute=True
+            )
+            slots[side][e["slot"]].append(e["into"])
+            if e.get("moved"):
+                batting[side][e["moved"]["player"]].position += "-" + e["moved"]["position"]
         elif e["type"] == "pitching_change":
             side = roster.side_of(e["team"])
             stints[side][-1].exit_lead = lead(side)
@@ -290,6 +302,7 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
 
     for s in sides:
         stints[s][-1].exit_lead = lead(s)
+        batting[s] = {pid: batting[s][pid] for slot in slots[s] for pid in slot}
     assert score["away"] == final["away"] and score["home"] == final["home"]
     _decide(pitching, stints, go_ahead, roster, score)
 
@@ -436,7 +449,8 @@ def format_box(box: BoxScore) -> str:
         totals = BattingLine()
         for b in box.batting[team].values():
             rows.append(
-                f"  {(b.name + ' ' + b.position)[:22]:<22} {b.ab:>3} {b.r:>2} {b.h:>2} "
+                f"  {(('  ' if b.substitute else '') + b.name + ' ' + b.position)[:22]:<22} "
+                f"{b.ab:>3} {b.r:>2} {b.h:>2} "
                 f"{b.rbi:>3} {b.bb:>2} {b.k:>2} {b.lob:>3}"
             )
             for k in ("ab", "r", "h", "rbi", "bb", "k", "lob"):
