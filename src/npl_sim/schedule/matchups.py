@@ -3,11 +3,14 @@
 MLB's balanced mix, per team (162):
 - division 52: 18 vs its rival (9 home), 17 vs the other two (9 home vs one,
   8 vs the other, swapping each season)
-- own league 64: 8 vs each of 8 teams, one 4-game series home and one away
+- own league 64: 8 vs each of 8 teams, 5 in one park (3 + 2) and 3 in the
+  other; each team hosts 5 vs four of them and 3 vs the other four, swapping
+  each season
 - interleague 46: 4 vs 10 teams as a 2-game series in each park, and 3 vs 2
   teams as one series in one park. The 3-game opponents rotate each season,
   and each 3-game pair swaps parks from one meeting to the next.
-Every team ends up with exactly 81 home games.
+Every team ends up with exactly 81 home games, all in 2- and 3-game series
+(Dave, 2026-10-12: MLB-style 2- or 3-game series with off and travel days).
 """
 
 from __future__ import annotations
@@ -30,11 +33,11 @@ class Series:
 
 
 def split_games(n: int) -> list[int]:
-    """Split one side's games against an opponent into 3- and 4-game series."""
-    if n <= 4:
+    """Split one side's games against an opponent into 3- and 2-game series."""
+    if n <= 3:
         return [n]
-    fours = {0: 0, 1: 1, 2: 2}[n % 3]
-    return [4] * fours + [3] * ((n - 4 * fours) // 3)
+    twos = {0: 0, 1: 2, 2: 1}[n % 3]
+    return [3] * ((n - 2 * twos) // 3) + [2] * twos
 
 
 def _series(home: str, away: str, games: int, kind: str) -> list[Series]:
@@ -63,12 +66,17 @@ def build_series(alignment: Alignment, season: int) -> list[Series]:
                     x, y = y, x
                 out += _series(x, y, 9, "division") + _series(y, x, 8, "division")
 
-        teams = [t for div in league.divisions for t in div.teams]
-        div_of = {t: div.name for div in league.divisions for t in div.teams}
-        for i, x in enumerate(teams):
-            for y in teams[i + 1 :]:
-                if div_of[x] != div_of[y]:
-                    out += _series(x, y, 4, "league") + _series(y, x, 4, "league")
+        # Own-league pairs: the teams of two divisions form a 4x4 grid; the
+        # team whose indices sum to an even number hosts 5, so everyone hosts
+        # 5 vs two of each other division's teams. Flips each season.
+        divs = league.divisions
+        for a in range(len(divs)):
+            for b in range(a + 1, len(divs)):
+                for i, x in enumerate(divs[a].teams):
+                    for j, y in enumerate(divs[b].teams):
+                        five, three = (y, x) if (i + j + season) % 2 else (x, y)
+                        out += _series(five, three, 5, "league")
+                        out += _series(three, five, 3, "league")
 
     al, nl = ([t for div in lg.divisions for t in div.teams] for lg in alignment.leagues)
     n = len(al)

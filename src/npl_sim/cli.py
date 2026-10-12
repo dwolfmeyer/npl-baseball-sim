@@ -1,5 +1,6 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`, `demo-game`, `demo-week`, `sim-week`, `web`, `eligibility`, and the
+`generate-schedule`, `demo-game`, `demo-week`, `sim-week`, `sim-season`, `web`, `eligibility`,
+`rosters-from-workbook`, and the
 MLB data pipeline (`pull-week`, `backfill`, `check-calendar`, `sync-mlb`)."""
 
 from __future__ import annotations
@@ -7,6 +8,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+from collections import Counter
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
@@ -27,6 +29,10 @@ from npl_sim.schedule.matchups import build_series
 from npl_sim.schedule.packer import pack
 from npl_sim.schedule.store import save_schedule
 from npl_sim.schedule.validate import validate
+
+# Interim league rosters, read from the roster workbook until the NPL app's
+# database login is issued (`rosters-from-workbook`).
+DEFAULT_ROSTERS = Path("data/rosters/npl-2026.json")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -79,6 +85,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     simw.add_argument("--clean-root", type=Path, default=Path("data/clean"))
     simw.add_argument("--out", type=Path, help="write index.html and a page per game here")
     simw.add_argument("--save", action="store_true", help="also save the games to the web app")
+
+    seas = sub.add_parser(
+        "sim-season",
+        help="sim a whole season week by week between every team's default lineup card",
+    )
+    seas.add_argument("--season", type=int, default=2026)
+    seas.add_argument("--seed", type=int, default=1)
+    seas.add_argument("--schedule-seed", type=int, default=0, help="solver seed")
+    seas.add_argument(
+        "--rosters", type=Path, default=DEFAULT_ROSTERS, help="NPL app dump of every team"
+    )
+    seas.add_argument("--csv", type=Path, help="also write every game's score to this CSV file")
+
+    wbk = sub.add_parser(
+        "rosters-from-workbook",
+        help="read the league's roster workbook (one tab per team) into an NPL app dump",
+    )
+    wbk.add_argument("workbook", type=Path)
+    wbk.add_argument("--season", type=int, default=2026)
+    wbk.add_argument("--out", type=Path, default=DEFAULT_ROSTERS)
 
     elig = sub.add_parser(
         "eligibility",
@@ -207,6 +233,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"  {team}: " + "; ".join(notes))
     elif args.cmd == "sim-week":
         return _sim_week(args)
+    elif args.cmd == "sim-season":
+        return _sim_season(args, league_file)
+    elif args.cmd == "rosters-from-workbook":
+        from npl_sim.rosters.workbook import players_from_workbook, write_dump
+
+        book = players_from_workbook(args.workbook, league_file.for_season(args.season))
+        path = write_dump(book.players, args.out)
+        active = [p for p in book.players if p.is_active_mlb]
+        print(f"Wrote {path}: {len(book.players)} players, {len(active)} on MLB Rosters")
+        for line in book.division_mismatches(league_file.for_season(args.season)):
+            print(f"Division differs: {line}")
     elif args.cmd == "eligibility":
         from npl_sim.pipeline.http import Http
         from npl_sim.rosters import eligibility
@@ -294,6 +331,73 @@ def _sim_week(args: argparse.Namespace) -> int:
                 }
             )
         print(f"Saved {len(result.games)} games to the web app")
+    return 0
+
+
+def _sim_season(args: argparse.Namespace, league_file) -> int:
+    from npl_sim.rosters import eligibility as elig_data
+    from npl_sim.season import default_cards, sim_season
+
+    alignment = league_file.for_season(args.season)
+    rosters: dict[str, list] = {}
+    for p in players_from_dump(args.rosters):
+        if p.is_active_mlb and p.mlb_id is not None:
+            rosters.setdefault(p.team, []).append(p)
+    teams = [s.team for s in team_slots(alignment)]
+    missing = [t for t in teams if t not in rosters]
+    if missing:
+        print(f"No roster for: {', '.join(missing)}")
+        return 1
+    elig = elig_data.load(args.season)
+    no_data = sum(p.mlb_id not in elig.players for r in rosters.values() for p in r)
+    weeks = sim_weeks(load_calendar(args.season))
+    schedule = pack(build_series(alignment, args.season), weeks, seed=args.schedule_seed)
+    problems = validate(schedule, alignment, weeks)
+    if problems:
+        print("\n".join(f"INVALID: {p}" for p in problems))
+        return 1
+    print(f"{sum(len(r) for r in rosters.values())} MLB Roster players; {no_data} have no MLB")
+    print("usage data yet and play a full-time week (`npl-sim eligibility` fills it in)\n")
+    result = sim_season(
+        default_cards(rosters, elig),
+        rosters,
+        elig,
+        schedule,
+        weeks,
+        args.seed,
+        on_week=lambda w, r: print(f"Week {w.number}: {len(r.games)} games", flush=True),
+    )
+    record = {t: (w, lo, rs, ra) for t, w, lo, rs, ra in result.standings()}
+    for slot_league in alignment.leagues:
+        for div in slot_league.divisions:
+            print(f"\n{slot_league.name} {div.name:<22} W   L   RS   RA")
+            for t in sorted(div.teams, key=lambda t: -record[t][0]):
+                w, lo, rs, ra = record[t]
+                print(f"  {t:<26} {w:>3} {lo:>3} {rs:>4} {ra:>4}")
+    t = result.totals
+    pa = t["PA"]
+    hits = sum(t[h] for h in ("1B", "2B", "3B", "HR"))
+    ab = pa - t["BB"] - t["HBP"] - t["SF"]
+    print(
+        f"\nRuns/team-game {t['runs'] / t['games'] / 2:.2f}  K% {100 * t['K'] / pa:.1f}  "
+        f"BB% {100 * t['BB'] / pa:.1f}  HR/PA {100 * t['HR'] / pa:.2f}%  AVG {hits / ab:.3f}  "
+        f"SB {t['stolen_base']} CS {t['caught_stealing']}  pitches/PA {t['pitches'] / pa:.2f}"
+    )
+    bullpen = Counter(team for g in result.games for team, b in g.bullpen_game.items() if b)
+    rest = result.starter_rest()
+    print(
+        f"Extra-inning games {sum(g.innings > 9 for g in result.games)} of {len(result.games)}; "
+        f"bullpen games {sum(bullpen.values())} (most: "
+        + ", ".join(f"{team} {n}" for team, n in bullpen.most_common(3))
+        + f"); fewest days between a pitcher's starts {min(rest) if rest else '-'}"
+    )
+    if args.csv:
+        with open(args.csv, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["date", "away", "home", "away_runs", "home_runs", "innings"])
+            for g in sorted(result.games, key=lambda g: (g.date, g.home)):
+                w.writerow([g.date, g.away, g.home, g.runs[g.away], g.runs[g.home], g.innings])
+        print(f"Wrote {args.csv}")
     return 0
 
 

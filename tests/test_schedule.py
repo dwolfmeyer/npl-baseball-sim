@@ -27,8 +27,9 @@ def season_2026():
 
 def test_split_games():
     assert split_games(2) == [2]
-    assert split_games(4) == [4]
-    assert split_games(8) == [4, 4]
+    assert split_games(4) == [2, 2]
+    assert split_games(5) == [3, 2]
+    assert split_games(8) == [3, 3, 2]
     assert split_games(9) == [3, 3, 3]
 
 
@@ -83,7 +84,7 @@ def test_weekly_load_and_no_back_to_back_opponents(season_2026):
             per_week[(team, item.week)] += item.series.games
         pair_weeks.setdefault(item.series.pair, []).append(item.week)
     full = {w.number for w in weeks if len(w.game_days) == 7}
-    assert all(per_week[(t, w)] >= 4 for (t, w) in per_week if w in full)
+    assert all(per_week[(t, w)] >= 5 for (t, w) in per_week if w in full)
     assert all(n <= 7 for n in per_week.values())
     for ws in pair_weeks.values():
         ws.sort()
@@ -115,3 +116,28 @@ def test_save_schedule_writes_weeks_and_games(season_2026):
     finally:
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_mlb_style_series_off_days_and_road_trips(season_2026):
+    """Dave (2026-10-12): 2- and 3-game series with off and travel days, so
+    starters on four days' rest and rested relievers line up."""
+    _, schedule = season_2026
+    assert {item.series.games for item in schedule} == {2, 3}
+    days: dict[str, list] = {}
+    homes: dict[str, list[bool]] = {}
+    for item in sorted(schedule, key=lambda x: x.dates[0]):
+        for team in (item.series.home, item.series.away):
+            days.setdefault(team, []).extend(item.dates)
+            homes.setdefault(team, []).append(team == item.series.home)
+    for team, played in days.items():
+        streak = longest = 1
+        for a, b in zip(played, played[1:], strict=False):
+            streak = streak + 1 if (b - a).days == 1 else 1
+            longest = max(longest, streak)
+        assert longest <= 20  # MLB's limit
+        off = (played[-1] - played[0]).days + 1 - len(played)
+        assert 18 <= off <= 26  # All-Star break included
+        run = 1
+        for a, b in zip(homes[team], homes[team][1:], strict=False):
+            run = run + 1 if a == b else 1
+            assert run <= 4  # no homestand or road trip over 4 series
