@@ -54,3 +54,28 @@ two and last two teams listed; set `rivals` on a division to change them.
 
 League structure lives in `config/league.yaml`. When divisions realign, add a
 new alignment block with its `from_season`; past seasons keep their divisions.
+
+### MLB data
+
+```sh
+npl-sim check-calendar --season 2026      # config/calendar.yaml vs the MLB schedule
+npl-sim pull-week --season 2026 --week 1  # Monday job: pull, normalize, freeze
+npl-sim backfill --season 2025            # a completed season, week by week
+npl-sim sync-mlb --season 2026            # handedness + lineup locks into the DB
+```
+
+Each pull lands raw under `data/raw/<source>/<dataset>/<season>/` (logged with
+URL and SHA-256 in `data/raw/manifest.jsonl`), then becomes clean Parquet
+tables keyed by MLBAM ID under `data/clean/<season>/`:
+
+| Where | Tables |
+| --- | --- |
+| `week-NN/` | `games`, `batting`, `pitching` (per game, MLB Stats API box scores), `pitches` (Statcast), `transactions`, `league_totals` |
+| `asof-YYYY-MM-DD/` | Savant `oaa`, `framing`, `poptime`, `sprint_speed`, `arm_strength`, `park_factors`; FanGraphs `fg_batting`, `fg_pitching`, `fg_fielding` (Stuff+, DRS), `fg_projections_*` |
+| `players.parquet` | bats, throws, position, birth date |
+
+`FROZEN.json` in a week folder records the hash of every table the sim week
+runs on; a frozen week is never pulled or rewritten again. Regular-season
+games before Opening Day (Opening Night, international series) count toward
+week 1. Savant leaderboards are only published season-to-date, so a backfill
+gets season-final boards; FanGraphs boards are true as-of pulls.

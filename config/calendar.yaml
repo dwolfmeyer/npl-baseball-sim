@@ -1,11 +1,23 @@
 # MLB regular-season calendar per season. NPL sim weeks run Monday-Sunday
 # and the season starts and ends the same weeks as MLB.
-# 2026 dates: Opening Day Thu Mar 26, All-Star Game Tue Jul 14,
-# final day Sun Sep 27. Check against the MLB Stats API schedule once the
-# data pipeline (M4) can reach it.
+#
+# opening_day is the first full slate. `openers` are earlier one-off
+# regular-season games (Opening Night, international series): NPL plays no
+# games on those days, but their MLB stats count toward sim week 1.
+# `npl-sim check-calendar --season N` compares this file with the MLB Stats
+# API schedule.
 seasons:
+  2025:
+    # Tokyo Series, Dodgers vs Cubs.
+    openers: [2025-03-18, 2025-03-19]
+    opening_day: 2025-03-27
+    final_day: 2025-09-28
+    # All-Star break: Mon-Thu around the All-Star Game (Tue Jul 15).
+    off_days: [2025-07-14, 2025-07-15, 2025-07-16, 2025-07-17]
   2026:
+    # Opening Night: Yankees at Giants (MLB 2026 schedule release).
+    openers: [2026-03-25]
     opening_day: 2026-03-26
     final_day: 2026-09-27
-    # League-wide dates with no games (All-Star break: Mon-Thu).
+    # All-Star break: Mon-Thu around the All-Star Game (Tue Jul 14).
     off_days: [2026-07-13, 2026-07-14, 2026-07-15, 2026-07-16]

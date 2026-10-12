@@ -11,6 +11,12 @@ dependencies = [
     "pydantic>=2.6",
     "pyyaml>=6.0",
     "ortools>=9.11",
+    "pandas>=2.2",
+    "pyarrow>=15",
+    "requests>=2.31",
+    # 2.2.7 is the newest release; its FanGraphs scraper is stale, so
+    # FanGraphs goes through the site's JSON API instead (pipeline/fangraphs.py).
+    "pybaseball>=2.2.7",
 ]
 
 [project.optional-dependencies]

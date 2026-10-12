@@ -8,5 +8,6 @@ build/
 dist/
 data/raw/
 data/snapshots/
+data/clean/
 *.parquet
 .env
