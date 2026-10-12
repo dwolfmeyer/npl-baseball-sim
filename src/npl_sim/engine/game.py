@@ -12,6 +12,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
+from npl_sim.engine import detail
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
 
 # Mean pitches per PA by outcome.
@@ -61,6 +62,11 @@ class TeamCard:
     park: ParkFactors | None = None  # used when this team is home
     alignment: str = "normal"
     steal_aggressiveness: float = 1.0  # 0 = never run, 1 = normal, 2 = aggressive
+    abbr: str = ""  # short name for scores in the play log; defaults to the first 3 letters
+
+    @property
+    def short(self) -> str:
+        return self.abbr or self.name[:3].upper()
 
 
 @dataclass
@@ -86,6 +92,8 @@ class GameSim:
     def __init__(self, away: TeamCard, home: TeamCard, env: LeagueEnv, seed: int):
         self.env = env
         self.rng = random.Random(seed)
+        # Play detail (fielders, counts) draws from its own stream; see detail.py.
+        self.detail_rng = random.Random(seed * 7919 + 17)
         self.park = home.park or ParkFactors()
         self.sides = {"away": _Side(away), "home": _Side(home)}
         for side in self.sides.values():
@@ -121,15 +129,47 @@ class GameSim:
         if not over or side.pen_index >= len(side.card.bullpen):
             return
         old = side.pitcher
+        on_base = sum(r is not None for r in self.bases) if mid_inning else 0
         side.pitcher = side.card.bullpen[side.pen_index]
         side.pen_index += 1
         side.pitches = 0
         side.batters_faced = 0
         side.pitchers_used.append(side.pitcher.id)
-        self._log("pitching_change", team=side.card.name, out=old.id, into=side.pitcher.id)
+        self._log(
+            "pitching_change",
+            team=side.card.name,
+            out=old.id,
+            into=side.pitcher.id,
+            outs=self.outs if mid_inning else 0,
+            on_base=on_base,
+        )
 
     # -- the game ------------------------------------------------------------
+    def _start(self) -> None:
+        def team(card: TeamCard) -> dict:
+            pitchers = [card.starter, *card.bullpen]
+            return {
+                "name": card.name,
+                "abbr": card.short,
+                "lineup": [
+                    {"id": h.id, "name": h.name, "position": pos, "bats": h.bats}
+                    for h, pos in card.lineup
+                ],
+                "pitchers": [{"id": p.id, "name": p.name, "throws": p.throws} for p in pitchers],
+                "starter": card.starter.id,
+            }
+
+        self._log(
+            "game_start",
+            away=team(self.sides["away"].card),
+            home=team(self.sides["home"].card),
+        )
+
+    def _bases(self) -> list[str | None]:
+        return [r.hitter.id if r else None for r in self.bases]
+
     def play(self) -> list[dict]:
+        self._start()
         while True:
             self._half_inning()
             if self._game_over():
@@ -169,7 +209,9 @@ class GameSim:
             if self.outs >= 3:
                 break
             self._plate_appearance()
-            self._maybe_change_pitcher(mid_inning=True)
+            if self.outs < 3:
+                self._maybe_change_pitcher(mid_inning=True)
+        self._log("half_end", left_on_base=sum(r is not None for r in self.bases))
         self.line["away" if self.half == "top" else "home"].append(side.runs - start_runs)
 
     def _walkoff(self) -> bool:
@@ -190,11 +232,19 @@ class GameSim:
         success = 0.78 + 0.06 * runner.hitter.speed - 0.08 * defense.card.defense.catcher_arm
         if self.rng.random() < min(max(success, 0.4), 0.95):
             self.bases[0], self.bases[1] = None, runner
-            self._log("stolen_base", runner=runner.hitter.id, pitcher=defense.pitcher.id)
+            kind = "stolen_base"
         else:
             self.bases[0] = None
             self.outs += 1
-            self._log("caught_stealing", runner=runner.hitter.id, pitcher=defense.pitcher.id)
+            kind = "caught_stealing"
+        self._log(
+            kind,
+            runner=runner.hitter.id,
+            pitcher=defense.pitcher.id,
+            base="2B",
+            outs_after=self.outs,
+            bases_after=self._bases(),
+        )
 
     def _plate_appearance(self) -> None:
         offense, defense = self._batting(), self._fielding()
@@ -227,9 +277,19 @@ class GameSim:
         defense.batters_faced += 1
 
         outs_before = self.outs
+        before = list(self.bases)
         scored: list[dict] = []
         outcome = self._resolve(result, hitter, pitcher, scored)
         rbi = len(scored) if outcome not in ("E", "DP") else 0
+        bip = kind if ":" in result else None
+        drng = self.detail_rng
+        balls, strikes, strikes_thrown = detail.count(drng, "BIP" if bip else kind, pitches)
+        extra = {}
+        if outcome == "K":
+            extra["k_type"] = detail.strikeout_kind(drng)
+        elif outcome == "HR":
+            extra["direction"] = detail.hr_direction(drng, side)
+            extra["batted_ball"] = detail.hr_ball(drng)
         self._log(
             "pa",
             batter=hitter.id,
@@ -237,12 +297,36 @@ class GameSim:
             team=offense.card.name,
             position=pos,
             result=outcome,
-            bip=kind if ":" in result else None,
+            bip=bip,
+            fielder=detail.fielder(drng, outcome, bip, side),
             pitches=pitches,
+            count=[balls, strikes],
+            strikes=strikes_thrown,
             outs=self.outs - outs_before,
+            outs_before=outs_before,
             scored=scored,
             rbi=rbi,
+            runners=self._movements(hitter, before, scored),
+            bases_before=[r.hitter.id if r else None for r in before],
+            bases_after=self._bases(),
+            **extra,
         )
+
+    def _movements(self, hitter: Hitter, before: list, scored: list) -> list[dict]:
+        """Where the batter and each runner started and ended on the play."""
+        after = {r.hitter.id: i for i, r in enumerate(self.bases) if r}
+        home = {s["runner"] for s in scored}
+        bases = ("1B", "2B", "3B")
+        moves = []
+        for start, r in [("B", hitter), *((bases[i], r.hitter) for i, r in enumerate(before) if r)]:
+            if r.id in home:
+                end = "score"
+            elif r.id in after:
+                end = bases[after[r.id]]
+            else:
+                end = "out"
+            moves.append({"runner": r.id, "start": start, "end": end})
+        return moves
 
     # -- baserunning ---------------------------------------------------------
     def _force(self, batter: Runner, scored: list) -> None:

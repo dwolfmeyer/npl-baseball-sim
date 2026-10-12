@@ -56,7 +56,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     demo = sub.add_parser("demo-game", help="sim one game between two average teams")
     demo.add_argument("--seed", type=int, default=1)
-    demo.add_argument("--pbp", action="store_true", help="also print play-by-play")
+    demo.add_argument(
+        "--plays",
+        choices=("all", "scoring"),
+        help="also print the play log: every play or scoring plays only",
+    )
+    demo.add_argument("--html", type=Path, help="write a Gameday-style game page here")
 
     def pipeline_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--season", type=int, required=True)
@@ -137,13 +142,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         from npl_sim.engine.box import box_score, format_box
         from npl_sim.engine.defaults import DEFAULT_ENV
         from npl_sim.engine.game import simulate_game
+        from npl_sim.engine.playlog import format_log, game_log
         from npl_sim.engine.sample import average_team
+        from npl_sim.reporting.gameday import render_game
 
         events = simulate_game(average_team("Away"), average_team("Home"), DEFAULT_ENV, args.seed)
-        box = box_score(events, "Away", "Home")
+        box = box_score(events)
         print(format_box(box))
-        if args.pbp:
-            print("\n" + "\n".join(box.play_by_play))
+        if args.plays:
+            print("\n" + format_log(game_log(events), args.plays))
+        if args.html:
+            args.html.write_text(render_game(box, game_log(events)))
+            print(f"\nWrote {args.html}")
     elif args.cmd in ("pull-week", "backfill", "check-calendar", "sync-mlb"):
         return _pipeline_command(args)
     return 0

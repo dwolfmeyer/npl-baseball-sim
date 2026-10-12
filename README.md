@@ -56,13 +56,17 @@ two and last two teams listed; set `rivals` on a division to change them.
 
 `src/npl_sim/engine` is a pure library: frozen player cards, lineups, park
 and league environment in; an event log out. Box scores and play-by-play are
-derived from that log only. Each PA combines batter and pitcher with
+derived from that log only, in MLB Gameday's format: line score with LOB,
+batting and pitching tables, W/L/S/H/BS decisions, the batting, baserunning,
+fielding and pitching notes, and a play log by half inning that filters to
+all plays or scoring plays. Each PA combines batter and pitcher with
 multinomial log5 against the league rate for that handedness matchup, then
 applies fatigue, catcher framing, park (the only place park factors enter)
 and defense/alignment once each.
 
 ```sh
-npl-sim demo-game --seed 3 --pbp   # two league-average teams
+npl-sim demo-game --seed 3 --plays scoring   # two league-average teams
+npl-sim demo-game --seed 3 --html game.html  # Gameday-style page: Box / Play-by-play
 ```
 
 League structure lives in `config/league.yaml`. When divisions realign, add a
