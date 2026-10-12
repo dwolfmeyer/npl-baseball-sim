@@ -1,6 +1,6 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`, `demo-game`, `web`, and the MLB data pipeline (`pull-week`, `backfill`,
-`check-calendar`, `sync-mlb`)."""
+`generate-schedule`, `demo-game`, `web`, `eligibility`, and the MLB data pipeline
+(`pull-week`, `backfill`, `check-calendar`, `sync-mlb`)."""
 
 from __future__ import annotations
 
@@ -62,6 +62,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="also print the play log: every play or scoring plays only",
     )
     demo.add_argument("--html", type=Path, help="write a Gameday-style game page here")
+
+    elig = sub.add_parser(
+        "eligibility",
+        help="pull position eligibility and hands for rostered players from the MLB Stats API",
+    )
+    elig.add_argument("--season", type=int, required=True, help="the NPL season")
+    elig.add_argument("--from-dump", help="read rosters from a dumpdata export, not the NPL DB")
 
     web = sub.add_parser("web", help="run the web app (lineup cards and game results)")
     web.add_argument("--host", default="127.0.0.1")
@@ -158,6 +165,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.html:
             args.html.write_text(render_game(box, game_log(events)))
             print(f"\nWrote {args.html}")
+    elif args.cmd == "eligibility":
+        from npl_sim.pipeline.http import Http
+        from npl_sim.rosters import eligibility
+
+        players = players_from_dump(args.from_dump) if args.from_dump else players_from_database()
+        ids = [p.mlb_id for p in players if p.is_active_mlb and p.mlb_id is not None]
+        path = eligibility.save(eligibility.fetch(Http(), ids, args.season))
+        print(f"Wrote {path} ({len(ids)} players)")
     elif args.cmd == "web":
         import uvicorn
 

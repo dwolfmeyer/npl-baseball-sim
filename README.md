@@ -90,7 +90,22 @@ orders against right- and left-handed starters (with DH), a five-man rotation
 and bullpen roles, checked against the roster as you edit. "Sim a game" plays
 two teams' saved cards and shows the Gameday box score and play-by-play.
 Rosters come from `NPL_DATABASE_URL` when set, otherwise from a dump
-(`NPL_ROSTER_DUMP`, default the Ducksnorts/McFlys test fixture). Cards and
+(`NPL_ROSTER_DUMP`, default the current Ducksnorts and McFlys MLB rosters).
+Drag rows to reorder a batting order, or drag a bench player onto a row. Each
+starter has a pitch limit, a times-through-the-order hook, and an optional
+opener and piggyback; situational defense is a set of checkboxes.
+
+Hitters can field a position with 20 MLB games there last season or 10 this
+season, and anyone can DH. Anyone else can still play a position, out of
+position (the card warns). Games by position and batting hands come from the
+MLB Stats API:
+
+```sh
+npl-sim eligibility --season 2026 --from-dump tests/fixtures/npl_2026_test_teams.json
+```
+
+which writes `data/eligibility/2026.json`. A player with no MLB fielding
+record falls back to his NPL roster position. Cards and
 games are stored as JSON under `NPL_WEB_DATA` (default `data/web`). Until the
 weekly MLB cards are wired in, every player sims at league-average rates.
 

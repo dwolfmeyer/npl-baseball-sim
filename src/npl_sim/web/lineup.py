@@ -1,18 +1,25 @@
 """The manager's weekly lineup card: who is active, batting orders against
-right- and left-handed starters, the rotation and bullpen roles.
+right- and left-handed starters, the rotation with each starter's plan
+(pitch limit, times-through-the-order hook, opener, piggyback), bullpen roles
+and situational defense.
 
-This is the web app's first cut. It checks the card against the roster and
-turns it into the engine's `TeamCard`. Until the weekly cards from the data
-pipeline land, every player sims with league-average rates; the engine's own
-lineup and bullpen logic (Milestone 6) replaces the simple reliever order here.
+The card is checked against the roster and position eligibility (see
+`npl_sim.rosters.eligibility`) and turned into the engine's `TeamCard`. Until
+the weekly cards from the data pipeline land, every player sims with
+league-average rates. The engine uses pitch limits, openers, piggybacks and
+situational defense now; the times-through-the-order hook is saved on the
+card for the engine's lineup and bullpen logic (Milestone 6).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 
+from npl_sim.eligibility import LISTED_FALLBACK
+from npl_sim.engine.alignment import AlignmentRule
 from npl_sim.engine.game import TeamCard
 from npl_sim.engine.sample import hitter, pitcher
+from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 
 ACTIVE_LIMIT = 30
@@ -22,29 +29,49 @@ SIDES = {"rhp": "vs RHP", "lhp": "vs LHP"}
 ROLES = {"CL": "Closer", "SU": "Setup", "MR": "Middle", "LR": "Long"}
 # Relievers enter in this order when the starter tires (closer last).
 ROLE_ORDER = ("LR", "MR", "SU", "CL")
-
-# Positions each NPL roster position can play without a warning.
-_ELIGIBLE = {
-    "C": {"C"},
-    "1B": {"1B"},
-    "2B": {"2B"},
-    "3B": {"3B", "1B"},
-    "SS": {"SS", "2B", "3B"},
-    "IF": {"1B", "2B", "3B", "SS"},
-    "OF": {"LF", "CF", "RF"},
-    "LF": {"LF"},
-    "CF": {"CF", "LF", "RF"},
-    "RF": {"RF", "LF"},
-    "UT": {"1B", "2B", "3B", "SS", "LF", "CF", "RF"},
+PITCH_LIMITS = range(60, 125, 5)
+DEFAULT_PITCH_LIMIT = 95
+TTO_HOOKS = {0: "No hook", 2: "Before 3rd time through", 3: "Before 4th time through"}
+OPENER_PITCHES = 25
+PIGGYBACK_PITCHES = 60
+DEFENSE_RULES = {
+    "infield_in": "Infield in with a runner on 3rd and fewer than 2 outs, "
+    "7th inning or later, tied or within a run",
+    "dp_depth": "Double-play depth with a runner on 1st and fewer than 2 outs",
+    "guard_lines": "Guard the lines in the 8th or later with a lead of 1 or 2 runs",
 }
+# The engine's rule for each box, checked in this order; the first that fits wins.
+DEFENSE_ENGINE_RULES = {
+    "infield_in": AlignmentRule("infield_in", from_inning=7, min_lead=-1, max_lead=1),
+    "dp_depth": AlignmentRule("double_play"),
+    "guard_lines": AlignmentRule("guard_lines", from_inning=8, min_lead=1, max_lead=2),
+}
+
+_INFIELD = {"1B", "2B", "3B", "SS"}
 
 
 def is_pitcher(p: NplPlayer) -> bool:
     return p.throws is not None or p.position.upper() == "P"
 
 
-def can_play(p: NplPlayer, position: str) -> bool:
-    return position == "DH" or position in _ELIGIBLE.get(p.position.upper(), set())
+def fielding(p: NplPlayer, elig: Eligibility | None) -> tuple[set[str], bool]:
+    """Positions the player may field and whether that came from MLB games
+    (True) or from his listed NPL position (False)."""
+    if elig is not None and p.mlb_id is not None:
+        return elig.positions(p.mlb_id, p.position), elig.qualifies(p.mlb_id)
+    return set(LISTED_FALLBACK.get(p.position.upper(), set())), False
+
+
+def can_play(p: NplPlayer, position: str, elig: Eligibility | None = None) -> bool:
+    return position == "DH" or position in fielding(p, elig)[0]
+
+
+@dataclass
+class StarterPlan:
+    pitch_limit: int = DEFAULT_PITCH_LIMIT
+    tto_hook: int = 0  # 0 = none; 2 = pull before the 3rd time through; 3 = before the 4th
+    opener: int | None = None  # a reliever who pitches the 1st, then the starter
+    piggyback: int | None = None  # a reliever who follows the starter for bulk innings
 
 
 @dataclass
@@ -53,14 +80,21 @@ class LineupCard:
     # Batting order by starter hand ("rhp"/"lhp"): nine (player id, position) slots.
     orders: dict[str, list[tuple[int | None, str]]] = field(default_factory=dict)
     rotation: list[int | None] = field(default_factory=list)
+    plans: list[StarterPlan] = field(default_factory=list)  # one per rotation slot
     roles: dict[int, str] = field(default_factory=dict)  # reliever id -> role
+    defense: dict[str, bool] = field(default_factory=dict)  # DEFENSE_RULES key -> on
+
+    def plan(self, slot: int) -> StarterPlan:
+        return self.plans[slot] if slot < len(self.plans) else StarterPlan()
 
     def to_json(self) -> dict:
         return {
             "active": self.active,
             "orders": {k: [list(s) for s in v] for k, v in self.orders.items()},
             "rotation": self.rotation,
+            "plans": [asdict(p) for p in self.plans],
             "roles": {str(k): v for k, v in self.roles.items()},
+            "defense": self.defense,
         }
 
     @classmethod
@@ -69,7 +103,9 @@ class LineupCard:
             active=list(data.get("active", [])),
             orders={k: [(s[0], s[1]) for s in v] for k, v in data.get("orders", {}).items()},
             rotation=list(data.get("rotation", [])),
+            plans=[StarterPlan(**p) for p in data.get("plans", [])],
             roles={int(k): v for k, v in data.get("roles", {}).items()},
+            defense={k: bool(v) for k, v in data.get("defense", {}).items() if k in DEFENSE_RULES},
         )
 
     @classmethod
@@ -90,6 +126,15 @@ class LineupCard:
             for side in SIDES
         }
         rotation = [pid(f"sp_{i}") for i in range(1, ROTATION_SIZE + 1)]
+        plans = [
+            StarterPlan(
+                pitch_limit=pid(f"sp_limit_{i}") or DEFAULT_PITCH_LIMIT,
+                tto_hook=pid(f"sp_tto_{i}") or 0,
+                opener=pid(f"sp_opener_{i}"),
+                piggyback=pid(f"sp_piggyback_{i}"),
+            )
+            for i in range(1, ROTATION_SIZE + 1)
+        ]
         roles = {}
         for key in form.keys():
             if key.startswith("role_") and key[5:].isdigit() and get(key) in ROLES:
@@ -98,7 +143,9 @@ class LineupCard:
             active=[int(a) for a in active if str(a).isdigit()],
             orders=orders,
             rotation=rotation,
+            plans=plans,
             roles=roles,
+            defense={key: bool(get(f"def_{key}")) for key in DEFENSE_RULES},
         )
 
 
@@ -112,7 +159,7 @@ class Check:
         return not self.errors
 
 
-def validate(card: LineupCard, roster: list[NplPlayer]) -> Check:
+def validate(card: LineupCard, roster: list[NplPlayer], elig: Eligibility | None = None) -> Check:
     check = Check()
     by_id = {p.mlb_id: p for p in roster}
     active = set(card.active)
@@ -147,9 +194,11 @@ def validate(card: LineupCard, roster: list[NplPlayer]) -> Check:
                 check.errors.append(f"{name(pid)} is in the order {label} but not active.")
             elif pid in by_id and is_pitcher(by_id[pid]):
                 check.errors.append(f"{name(pid)} is a pitcher in the order {label}.")
-            elif pid in by_id and pos and not can_play(by_id[pid], pos):
+            elif pid in by_id and pos and not can_play(by_id[pid], pos, elig):
+                where = ", ".join(sorted(fielding(by_id[pid], elig)[0])) or "DH only"
+                # Allowed, as in Scoresheet: he plays out of position with a defensive penalty.
                 check.warnings.append(
-                    f"{name(pid)} ({by_id[pid].position}) plays {pos} out of position {label}."
+                    f"{name(pid)} is out of position at {pos} {label} (eligible: {where})."
                 )
 
     starters = [pid for pid in card.rotation if pid is not None]
@@ -163,6 +212,22 @@ def validate(card: LineupCard, roster: list[NplPlayer]) -> Check:
         elif pid in by_id and not is_pitcher(by_id[pid]):
             check.errors.append(f"{name(pid)} is in the rotation but is not a pitcher.")
 
+    for slot in range(len(card.rotation)):
+        plan = card.plan(slot)
+        if plan.pitch_limit not in PITCH_LIMITS:
+            check.errors.append(f"Starter {slot + 1}'s pitch limit must be 60 to 120.")
+        if plan.opener is not None and plan.opener == plan.piggyback:
+            check.errors.append(f"Starter {slot + 1} has the same opener and piggyback.")
+        for what, pid in (("opener", plan.opener), ("piggyback", plan.piggyback)):
+            if pid is None:
+                continue
+            if pid not in active or pid not in by_id or not is_pitcher(by_id[pid]):
+                check.errors.append(f"Starter {slot + 1}'s {what} must be an active pitcher.")
+            elif pid in starters:
+                check.errors.append(
+                    f"{name(pid)} is in the rotation, so he can't be starter {slot + 1}'s {what}."
+                )
+
     relievers = [pid for pid in card.roles if pid in active and pid not in starters]
     closers = [pid for pid in relievers if card.roles[pid] == "CL"]
     if len(closers) != 1:
@@ -172,21 +237,33 @@ def validate(card: LineupCard, roster: list[NplPlayer]) -> Check:
     return check
 
 
-def default_card(roster: list[NplPlayer]) -> LineupCard:
-    """A legal starting card: fill the positions, the rotation and the pen in
-    roster order, then cut to the active limit."""
+def default_card(roster: list[NplPlayer], elig: Eligibility | None = None) -> LineupCard:
+    """A legal starting card: fill the positions with eligible hitters, the
+    rotation and the pen in roster order, then cut to the active limit."""
     hitters = [p for p in roster if not is_pitcher(p)]
     arms = [p for p in roster if is_pitcher(p)]
-    order: list[tuple[int, str]] = []
+    picks: dict[str, int] = {}
     used: set[int] = set()
-    # Scarce positions first, exact roster position before anyone eligible.
-    for pos in ("C", "SS", "2B", "CF", "3B", "1B", "LF", "RF", "DH"):
-        pick = next((h for h in hitters if h.mlb_id not in used and h.position == pos), None)
-        pick = pick or next((h for h in hitters if h.mlb_id not in used and can_play(h, pos)), None)
-        pick = pick or next((h for h in hitters if h.mlb_id not in used), None)
-        if pick is not None:
+    fields = ("C", "SS", "2B", "CF", "3B", "1B", "LF", "RF")
+    # Scarce positions first; among eligible hitters, those with fewest options first.
+    for pos in fields:
+        options = [h for h in hitters if h.mlb_id not in used and can_play(h, pos, elig)]
+        if options:
+            pick = min(options, key=lambda h: len(fielding(h, elig)[0]))
+            picks[pos] = pick.mlb_id
             used.add(pick.mlb_id)
-            order.append((pick.mlb_id, pos))
+    # Nobody eligible: put someone there anyway (an infielder for an infield spot,
+    # an outfielder for the outfield) and let the check flag it. Then the DH.
+    for pos in (*fields, "DH"):
+        if pos in picks:
+            continue
+        group = _INFIELD if pos in _INFIELD else {"LF", "CF", "RF"}
+        rest = [h for h in hitters if h.mlb_id not in used]
+        rest.sort(key=lambda h: pos != "DH" and not (fielding(h, elig)[0] & group))
+        if rest:
+            picks[pos] = rest[0].mlb_id
+            used.add(rest[0].mlb_id)
+    order = [(pid, pos) for pos, pid in picks.items()]
     rotation = [p.mlb_id for p in arms[:ROTATION_SIZE]]
     pen = arms[ROTATION_SIZE:]
     room = max(0, ACTIVE_LIMIT - len(order) - len(rotation))
@@ -202,6 +279,7 @@ def default_card(roster: list[NplPlayer]) -> LineupCard:
         active=active,
         orders={side: list(order) for side in SIDES},
         rotation=rotation,
+        plans=[StarterPlan() for _ in rotation],
         roles=roles,
     )
 
@@ -213,26 +291,52 @@ def team_card(
     roster: list[NplPlayer],
     starter_slot: int,
     opposing_throws: str,
+    elig: Eligibility | None = None,
 ) -> TeamCard:
     """The engine's card for one game: the order for the opposing starter's
-    hand, the starter from this rotation slot (0-based) and the pen by role."""
+    hand, the starter from this rotation slot (0-based) with his plan, and the
+    pen by role."""
     by_id = {p.mlb_id: p for p in roster}
     side = "lhp" if opposing_throws == "L" else "rhp"
     lineup = []
     for pid, pos in card.orders[side]:
-        p = by_id[pid]
-        # Bats are not in the NPL roster data yet; right-handed until the pipeline adds them.
-        lineup.append((replace(hitter(str(pid)), name=p.name), pos))
+        rec = elig.players.get(pid) if elig else None
+        # Right-handed when the hand isn't known yet.
+        bats = rec.bats if rec and rec.bats in ("L", "R", "S") else "R"
+        lineup.append((replace(hitter(str(pid), bats=bats), name=by_id[pid].name), pos))
+    alignment_rules = tuple(
+        rule for key, rule in DEFENSE_ENGINE_RULES.items() if card.defense.get(key)
+    )
 
     def arm(pid: int, limit: int):
         p = by_id[pid]
         return replace(pitcher(str(pid), p.throws or "R", limit=limit), name=p.name)
 
-    starters = [pid for pid in card.rotation if pid is not None]
-    starter = arm(starters[starter_slot % len(starters)], 95)
+    slots = [(i, pid) for i, pid in enumerate(card.rotation) if pid is not None]
+    slot, starter_id = slots[starter_slot % len(slots)]
+    plan = card.plan(slot)
+    starters = {pid for _, pid in slots}
+    starter = arm(starter_id, plan.pitch_limit)
+    # An opener takes the first inning or so; the starter follows, then the piggyback.
+    first = arm(plan.opener, OPENER_PITCHES) if plan.opener else starter
+    bulk = [starter] if plan.opener else []
+    if plan.piggyback:
+        bulk.append(arm(plan.piggyback, PIGGYBACK_PITCHES))
+    planned = {plan.opener, plan.piggyback}
     pen_ids = sorted(
-        (pid for pid, role in card.roles.items() if pid in card.active and pid not in starters),
+        (
+            pid
+            for pid in card.roles
+            if pid in card.active and pid not in starters and pid not in planned
+        ),
         key=lambda pid: ROLE_ORDER.index(card.roles[pid]),
     )
-    bullpen = [arm(pid, 25) for pid in pen_ids]
-    return TeamCard(name=team, lineup=lineup, starter=starter, bullpen=bullpen, abbr=abbr)
+    bullpen = bulk + [arm(pid, 25) for pid in pen_ids]
+    return TeamCard(
+        name=team,
+        lineup=lineup,
+        starter=first,
+        bullpen=bullpen,
+        abbr=abbr,
+        alignment_rules=alignment_rules,
+    )
