@@ -89,7 +89,8 @@ starter has a pitch limit, a times-through-the-order hook, and an optional
 opener and piggyback; situational defense is a set of checkboxes.
 
 Hitters can field a position with 20 MLB games there last season or 10 this
-season, and anyone can DH. Games by position and batting hands come from the
+season, and anyone can DH. Anyone else can still play a position, out of
+position (the card warns). Games by position and batting hands come from the
 MLB Stats API:
 
 ```sh

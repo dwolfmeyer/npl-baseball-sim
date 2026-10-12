@@ -63,8 +63,8 @@ def test_eligibility_rule():
     rhp = [(pid, pos) for pid, pos in card.orders["rhp"] if pid != HENDERSON]
     card.orders["rhp"] = [*rhp, (HENDERSON, "3B")]
     assert HENDERSON in card.active
-    errors = " ".join(validate(card, roster(DUCKS), ELIG).errors)
-    assert "Gunnar Henderson is not eligible at 3B vs RHP (eligible: SS)" in errors
+    warnings = " ".join(validate(card, roster(DUCKS), ELIG).warnings)
+    assert "Gunnar Henderson is out of position at 3B vs RHP (eligible: SS)" in warnings
 
 
 def test_validate_catches_bad_cards():

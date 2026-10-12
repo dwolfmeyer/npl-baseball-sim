@@ -206,8 +206,9 @@ def validate(card: LineupCard, roster: list[NplPlayer], elig: Eligibility | None
                 check.errors.append(f"{name(pid)} is a pitcher in the order {label}.")
             elif pid in by_id and pos and not can_play(by_id[pid], pos, elig):
                 where = ", ".join(sorted(fielding(by_id[pid], elig)[0])) or "DH only"
-                check.errors.append(
-                    f"{name(pid)} is not eligible at {pos} {label} (eligible: {where})."
+                # Allowed, as in Scoresheet: he plays out of position with a defensive penalty.
+                check.warnings.append(
+                    f"{name(pid)} is out of position at {pos} {label} (eligible: {where})."
                 )
 
     starters = [pid for pid in card.rotation if pid is not None]
