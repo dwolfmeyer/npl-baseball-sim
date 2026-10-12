@@ -72,58 +72,118 @@ document.addEventListener('click', (ev) => {
   recheck(list.closest('form'));
 });
 
+// Rotation rows carry their spot number in their field names (sp_3,
+// sp_limit_3, ...); after a move, renumber them so each plan follows its starter.
+function renumberRotation(body) {
+  [...body.querySelectorAll('tr.sp-row')].forEach((tr, n) => {
+    tr.querySelector('.num').textContent = n + 1;
+    tr.querySelectorAll('[name^="sp_"]').forEach((el) => {
+      el.name = el.id = el.name.replace(/_\d+$/, `_${n + 1}`);
+    });
+  });
+}
+
+function setRole(form, pid, role) {
+  const select = form.querySelector(`[name="role_${pid}"]`);
+  if (select) { select.value = role; return; }
+  // A starter moving to the bullpen has no role field yet.
+  const input = Object.assign(document.createElement('input'), {type: 'hidden', name: `role_${pid}`, value: role});
+  form.appendChild(input);
+}
+
 // Drag with pointer events so it works with a mouse and on touch screens.
+// Kinds: "row" (batting order row), "chip" (bench player onto a row),
+// "sp" (rotation row: reorder, or drop on a bullpen role), "rp" (reliever:
+// drop on another role, or on a rotation spot).
 let drag = null;
 document.addEventListener('pointerdown', (ev) => {
   const handle = ev.target.closest('[data-drag]');
   if (!handle || ev.button > 0) return;
   ev.preventDefault();
   const kind = handle.dataset.drag;
-  const item = kind === 'row' ? handle.closest('li.slot') : handle;
-  const list = item.closest('section').querySelector('.order-list');
+  const item = {row: () => handle.closest('li.slot'), sp: () => handle.closest('tr'), rp: () => handle.closest('tr')}[kind]?.() || handle;
+  const list = kind === 'sp' ? item.parentElement : kind === 'rp' ? null : item.closest('section').querySelector('.order-list');
   const box = item.getBoundingClientRect();
-  const ghost = item.cloneNode(true);
-  ghost.classList.add('ghost');
-  ghost.style.width = box.width + 'px';
+  let ghost;
+  if (kind === 'sp' || kind === 'rp') {
+    ghost = Object.assign(document.createElement('span'), {className: 'chip ghost', textContent: handle.dataset.name});
+  } else {
+    ghost = item.cloneNode(true);
+    ghost.classList.add('ghost');
+    ghost.style.width = box.width + 'px';
+  }
   ghost.style.left = box.left + 'px';
   ghost.style.top = box.top + 'px';
   document.body.appendChild(ghost);
   item.classList.add('dragging');
-  drag = {kind, item, list, ghost, dx: ev.clientX - box.left, dy: ev.clientY - box.top, target: null};
+  drag = {kind, item, pid: handle.dataset.pid, list, ghost, dx: ev.clientX - box.left, dy: ev.clientY - box.top, target: null};
 });
+
+function dropTarget(kind, under, list) {
+  if (!under) return null;
+  if (kind === 'row' || kind === 'chip') {
+    const row = under.closest('li.slot');
+    return row && row.parentElement === list ? row : null;
+  }
+  const sp = under.closest('tr.sp-row');
+  if (sp && (kind === 'rp' || sp.parentElement === list)) return sp;
+  return under.closest('[data-role-group]');
+}
+
 document.addEventListener('pointermove', (ev) => {
   if (!drag) return;
   drag.ghost.style.left = ev.clientX - drag.dx + 'px';
   drag.ghost.style.top = ev.clientY - drag.dy + 'px';
-  const under = document.elementFromPoint(ev.clientX, ev.clientY);
-  const row = under && under.closest('li.slot');
-  const target = row && row.parentElement === drag.list ? row : null;
+  const target = dropTarget(drag.kind, document.elementFromPoint(ev.clientX, ev.clientY), drag.list);
   if (drag.target && drag.target !== target) drag.target.classList.remove('over');
   drag.target = target;
   if (target && target !== drag.item) target.classList.add('over');
-  if (drag.kind === 'row' && target && target !== drag.item) {
+  const reorder = (drag.kind === 'row' && target) || (drag.kind === 'sp' && target && target.matches('tr.sp-row'));
+  if (reorder && target !== drag.item) {
     const mid = target.getBoundingClientRect().top + target.offsetHeight / 2;
     drag.list.insertBefore(drag.item, ev.clientY < mid ? target : target.nextElementSibling);
     target.classList.remove('over');
   }
 });
+
 function endDrag(ev) {
   if (!drag) return;
-  const {kind, item, list, ghost, target} = drag;
+  const {kind, item, pid, list, ghost, target} = drag;
   drag = null;
   ghost.remove();
   item.classList.remove('dragging');
   if (target) target.classList.remove('over');
   if (ev.type === 'pointercancel') return;
+  const form = item.closest('form');
   if (kind === 'row') {
     renumber(list);
-    recheck(list.closest('form'));
-  } else if (target) {
+    recheck(form);
+  } else if (kind === 'chip' && target) {
     // A bench player takes the row's spot in the order; the row's player goes to the bench.
     const who = target.querySelector('select.who');
     if (![...who.options].some((o) => o.value === item.dataset.pid)) return;
     who.value = item.dataset.pid;
-    recheck(list.closest('form'));
+    recheck(form);
+  } else if (kind === 'sp') {
+    renumberRotation(list);
+    if (target && target.matches('[data-role-group]') && pid) {
+      // Starter to the bullpen, in the role he was dropped on.
+      item.querySelector('select[name^="sp_"]').value = '';
+      setRole(form, pid, target.dataset.roleGroup);
+    }
+    recheck(form);
+  } else if (kind === 'rp' && target) {
+    if (target.matches('[data-role-group]')) {
+      setRole(form, pid, target.dataset.roleGroup);
+    } else {
+      // Reliever into the rotation; the starter there takes his bullpen role.
+      const sp = target.querySelector('select[name^="sp_"]');
+      if (![...sp.options].some((o) => o.value === pid)) return;
+      const old = sp.value, role = form.querySelector(`[name="role_${pid}"]`)?.value || '';
+      sp.value = pid;
+      if (old) setRole(form, old, role);
+    }
+    recheck(form);
   }
 }
 document.addEventListener('pointerup', endDrag);

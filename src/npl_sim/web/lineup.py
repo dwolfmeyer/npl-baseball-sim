@@ -15,8 +15,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
 
-from npl_sim.eligibility import LISTED_FALLBACK
+from npl_sim.eligibility import FIELD_POSITIONS, LISTED_FALLBACK
 from npl_sim.engine.alignment import AlignmentRule
+from npl_sim.engine.game import DefensiveSub as EngineSub
 from npl_sim.engine.game import TeamCard
 from npl_sim.engine.sample import hitter, pitcher
 from npl_sim.rosters.eligibility import Eligibility
@@ -99,6 +100,34 @@ class DefensiveSub:
 
 
 DEFENSIVE_SUB_ROWS = 4
+# How a reliever is used; "" follows his role (closer and setup high leverage,
+# middle medium, long man long relief).
+USAGE = {
+    "": "By role",
+    "high": "High leverage",
+    "medium": "Medium leverage",
+    "low": "Low leverage",
+    "mopup": "Mop-up (blowouts)",
+    "long": "Long relief",
+    "any": "Any situation",
+}
+ROLE_USAGE = {"CL": "high", "SU": "high", "MR": "medium", "LR": "long"}
+MATCHUPS = {"": "Any batter", "L": "Lefty specialist", "R": "Righty specialist"}
+# Stint length in outs; None = the engine default (3, or 9 for long and mop-up).
+STINTS = {None: "Default", 1: "1 out", 2: "2 outs", 3: "1 inning", 6: "2 innings", 9: "3 innings"}
+
+
+@dataclass
+class ReliefPlan:
+    usage: str = ""
+    start_of_inning_only: bool = False
+    vs: str | None = None  # "L"/"R": brought in for same-side batters
+    max_outs: int | None = None
+
+    def is_default(self) -> bool:
+        return self == ReliefPlan()
+
+
 SUB_INNINGS = range(6, 13)
 
 
@@ -112,6 +141,10 @@ class LineupCard:
     roles: dict[int, str] = field(default_factory=dict)  # reliever id -> role
     defense: dict[str, bool] = field(default_factory=dict)  # DEFENSE_RULES key -> on
     subs: list[DefensiveSub] = field(default_factory=list)
+    relief: dict[int, ReliefPlan] = field(default_factory=dict)  # reliever id -> usage
+
+    def relief_plan(self, pid: int) -> ReliefPlan:
+        return self.relief.get(pid) or ReliefPlan()
 
     def plan(self, slot: int) -> StarterPlan:
         return self.plans[slot] if slot < len(self.plans) else StarterPlan()
@@ -125,6 +158,7 @@ class LineupCard:
             "roles": {str(k): v for k, v in self.roles.items()},
             "defense": self.defense,
             "subs": [asdict(sub) for sub in self.subs],
+            "relief": {str(k): asdict(v) for k, v in self.relief.items()},
         }
 
     @classmethod
@@ -137,6 +171,7 @@ class LineupCard:
             roles={int(k): v for k, v in data.get("roles", {}).items()},
             defense={k: bool(v) for k, v in data.get("defense", {}).items() if k in DEFENSE_RULES},
             subs=[DefensiveSub(**sub) for sub in data.get("subs", [])],
+            relief={int(k): ReliefPlan(**v) for k, v in data.get("relief", {}).items()},
         )
 
     @classmethod
@@ -166,10 +201,21 @@ class LineupCard:
             )
             for i in range(1, ROTATION_SIZE + 1)
         ]
-        roles = {}
+        roles, relief = {}, {}
         for key in form.keys():
             if key.startswith("role_") and key[5:].isdigit() and get(key) in ROLES:
                 roles[int(key[5:])] = get(key)
+            if key.startswith("rp_use_") and key[7:].isdigit():
+                rid = key[7:]
+                outs = pid(f"rp_outs_{rid}")
+                plan = ReliefPlan(
+                    usage=get(key) if get(key) in USAGE else "",
+                    start_of_inning_only=bool(get(f"rp_clean_{rid}")),
+                    vs=get(f"rp_vs_{rid}") or None if get(f"rp_vs_{rid}") in MATCHUPS else None,
+                    max_outs=outs if outs in STINTS else None,
+                )
+                if not plan.is_default():
+                    relief[int(rid)] = plan
         return cls(
             active=[int(a) for a in active if str(a).isdigit()],
             orders=orders,
@@ -188,6 +234,7 @@ class LineupCard:
                 for i in range(1, DEFENSIVE_SUB_ROWS + 1)
                 if (player := pid(f"sub_player_{i}")) is not None
             ],
+            relief=relief,
         )
 
 
@@ -463,12 +510,31 @@ def team_card(
     pen by role."""
     by_id = {p.mlb_id: p for p in roster}
     side = "lhp" if opposing_throws == "L" else "rhp"
-    lineup = []
-    for pid, pos in card.orders[side]:
+
+    def bat(pid: int):
         rec = elig.players.get(pid) if elig else None
         # Right-handed when the hand isn't known yet.
         bats = rec.bats if rec and rec.bats in ("L", "R", "S") else "R"
-        lineup.append((replace(hitter(str(pid), bats=bats), name=by_id[pid].name), pos))
+        return replace(hitter(str(pid), bats=bats), name=by_id[pid].name)
+
+    lineup = [(bat(pid), pos) for pid, pos in card.orders[side]]
+    starting = {pid for pid, _ in card.orders[side]}
+    # Subs who start today, or who are only for a starter sitting today, stay out.
+    defensive_subs = tuple(
+        EngineSub(
+            player=bat(sub.player),
+            position=sub.position,
+            from_inning=sub.from_inning,
+            only_when_leading=sub.only_when_leading,
+            replaces=str(sub.replaces) if sub.replaces else None,
+        )
+        for sub in card.subs
+        if sub.player in by_id
+        and sub.player in card.active
+        and sub.player not in starting
+        and sub.position in FIELD_POSITIONS
+        and (sub.replaces is None or sub.replaces in starting)
+    )
     alignment_rules = tuple(
         rule for key, rule in DEFENSE_ENGINE_RULES.items() if card.defense.get(key)
     )
@@ -505,4 +571,5 @@ def team_card(
         bullpen=bullpen,
         abbr=abbr,
         alignment_rules=alignment_rules,
+        defensive_subs=defensive_subs,
     )

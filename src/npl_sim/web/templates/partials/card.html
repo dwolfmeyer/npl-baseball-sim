@@ -67,12 +67,13 @@
   {% set rotation_ids = card.rotation | reject("none") | list %}
   {% set planned = card.plans | map(attribute="piggyback") | reject("none") | list %}
   <div class="wrap"><table class="rotation">
-    <tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Pull after</th><th>Opener</th><th>Piggyback</th></tr>
+    <thead><tr><th>#</th><th>Starter</th><th>Pitch limit</th><th>Pull after</th><th>Opener</th><th>Piggyback</th></tr></thead>
+    <tbody class="sp-list">
     {% for i in range(rotation_size) %}
     {% set pid = card.rotation[i] if i < card.rotation|length else None %}
     {% set plan = card.plan(i) %}
-    <tr>
-      <td>{{ i + 1 }}</td>
+    <tr class="sp-row">
+      <td class="nowrap"><span class="grip" data-drag="sp" data-pid="{{ pid or '' }}" data-name="{{ names.get(pid, 'Starter ' ~ (i + 1)) }}" aria-hidden="true" title="Drag to reorder the rotation, or onto a bullpen role">⠿</span> <span class="num">{{ i + 1 }}</span></td>
       <td><select id="sp_{{ i + 1 }}" name="sp_{{ i + 1 }}" aria-label="Starter {{ i + 1 }}">
         <option value="">—</option>
         {% for a in arms %}{% if (a.mlb_id in active and a.mlb_id not in rotation_ids and a.mlb_id not in planned) or a.mlb_id == pid %}
@@ -94,23 +95,46 @@
       </select></td>
     </tr>
     {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>Bullpen</h2>
+  <p class="muted small">Drag a reliever to another role, or onto a rotation spot to make him a starter (that starter takes his role). "Use in" defaults to his role: closer and setup in high leverage, middle in medium, long man for long relief. A specialist comes in for same-side batters. Saved on the card; the engine uses these once its bullpen logic lands, until then relievers enter long, middle, setup, then closer.</p>
+  {% set pen = arms | selectattr("mlb_id", "in", active) | rejectattr("mlb_id", "in", rotation) | list %}
+  <div class="wrap"><table class="order pen">
+  <thead><tr><th></th><th>Reliever</th><th>Role</th><th>Use in</th><th>Faces</th><th>Stint</th><th>Start of inning only</th></tr></thead>
+  {% for code, title in pen_groups %}
+  <tbody data-role-group="{{ code }}">
+  <tr><th colspan="7">{{ title }}</th></tr>
+  {% set ns = namespace(n=0) %}
+  {% for a in pen %}{% if (card.roles.get(a.mlb_id) or "") == code %}{% set ns.n = ns.n + 1 %}
+  <tr class="rp-row"><td><span class="grip" data-drag="rp" data-pid="{{ a.mlb_id }}" data-name="{{ a.name }}" aria-hidden="true" title="Drag to another role or a rotation spot">⠿</span></td>
+  <td>{{ a.name }} <span class="muted small">{{ a.position }}</span></td>
+  <td><select id="role_{{ a.mlb_id }}" name="role_{{ a.mlb_id }}" aria-label="Role for {{ a.name }}">
+    <option value="">—</option>
+    {% for c2, name in roles.items() %}<option value="{{ c2 }}" {% if card.roles.get(a.mlb_id) == c2 %}selected{% endif %}>{{ name }}</option>{% endfor %}
+  </select></td>
+  {% set rp = card.relief_plan(a.mlb_id) %}
+  <td><select id="rp_use_{{ a.mlb_id }}" name="rp_use_{{ a.mlb_id }}" aria-label="When to use {{ a.name }}">
+    {% for k, text in usage.items() %}<option value="{{ k }}" {% if rp.usage == k %}selected{% endif %}>{{ text }}</option>{% endfor %}
+  </select></td>
+  <td><select id="rp_vs_{{ a.mlb_id }}" name="rp_vs_{{ a.mlb_id }}" aria-label="Batters {{ a.name }} faces">
+    {% for k, text in matchups.items() %}<option value="{{ k }}" {% if (rp.vs or "") == k %}selected{% endif %}>{{ text }}</option>{% endfor %}
+  </select></td>
+  <td><select id="rp_outs_{{ a.mlb_id }}" name="rp_outs_{{ a.mlb_id }}" aria-label="Stint length for {{ a.name }}">
+    {% for k, text in stints.items() %}<option value="{{ k if k else '' }}" {% if rp.max_outs == k %}selected{% endif %}>{{ text }}</option>{% endfor %}
+  </select></td>
+  <td><input type="checkbox" id="rp_clean_{{ a.mlb_id }}" name="rp_clean_{{ a.mlb_id }}" value="1" aria-label="{{ a.name }} starts innings only" {% if rp.start_of_inning_only %}checked{% endif %}></td></tr>
+  {% endif %}{% endfor %}
+  {% if not ns.n %}<tr class="empty"><td></td><td colspan="6" class="muted small">Drag a reliever here</td></tr>{% endif %}
+  </tbody>
+  {% endfor %}
   </table></div>
 </section>
 
 <div class="grid2">
-<section class="card">
-  <h2>Bullpen</h2>
-  <p class="muted small">For now relievers enter long, middle, setup, then closer when the starter tires. Leverage-based use comes with the engine's bullpen logic.</p>
-  <table class="order">
-  {% for a in arms %}{% if a.mlb_id in active and a.mlb_id not in rotation %}
-  <tr><td></td><td>{{ a.name }} <span class="muted small">{{ a.position }}</span></td>
-  <td><select id="role_{{ a.mlb_id }}" name="role_{{ a.mlb_id }}" aria-label="Role for {{ a.name }}">
-    <option value="">—</option>
-    {% for code, name in roles.items() %}<option value="{{ code }}" {% if card.roles.get(a.mlb_id) == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
-  </select></td></tr>
-  {% endif %}{% endfor %}
-  </table>
-</section>
 <section class="card">
   <h2>Situational defense</h2>
   <p class="muted small">Leave these off to play straight up all game. When more than one fits, the first one listed wins.</p>
@@ -122,7 +146,7 @@
 
 <section class="card">
   <h2>Defensive replacements</h2>
-  <p class="muted small">Bring a bench player in late for defense. Leave "Replaces" on "Whoever plays there" to sub for anyone at that position, or pick one starter to sub only for him. Saved on the card; the engine makes the switch once its substitution logic lands.</p>
+  <p class="muted small">Bring a bench player in late for defense. Leave "Replaces" on "Whoever plays there" to sub for anyone at that position, or pick one starter to sub only for him. He comes in at the top of the inning when the conditions fit; a replacement who starts that day, or one only for a starter who sits, is skipped.</p>
   {% set starting = card.orders.values() | map("map", attribute=0) | map("list") | sum(start=[]) %}
   {% set sub_ids = card.subs | map(attribute="player") | list %}
   {% set rhp_ids = card.orders.get("rhp", []) | map(attribute=0) | list %}
