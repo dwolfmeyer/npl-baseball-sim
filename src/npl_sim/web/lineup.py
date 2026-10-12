@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field, replace
 
 from npl_sim.eligibility import FIELD_POSITIONS, LISTED_FALLBACK
 from npl_sim.engine.alignment import AlignmentRule
+from npl_sim.engine.bullpen import ReliefUsage
 from npl_sim.engine.game import DefensiveSub as EngineSub
 from npl_sim.engine.game import TeamCard
 from npl_sim.engine.sample import hitter, pitcher
@@ -563,7 +564,19 @@ def team_card(
         ),
         key=lambda pid: ROLE_ORDER.index(card.roles[pid]),
     )
-    bullpen = bulk + [arm(pid, 25) for pid in pen_ids]
+    # Each reliever's usage: his own settings, or his role's. Relievers are
+    # listed setup before closer, so a high spot in the 8th goes to the setup man.
+    relief = {}
+    for pid in pen_ids:
+        rp = card.relief_plan(pid)
+        relief[str(pid)] = ReliefUsage(
+            role=rp.usage or ROLE_USAGE[card.roles[pid]],
+            start_of_inning_only=rp.start_of_inning_only,
+            vs=rp.vs,
+            max_outs=rp.max_outs,
+        )
+    # Enough pitches for his stint (about 6 an out), never under 25.
+    bullpen = bulk + [arm(pid, max(25, 6 * relief[str(pid)].outs)) for pid in pen_ids]
     return TeamCard(
         name=team,
         lineup=lineup,
@@ -572,4 +585,7 @@ def team_card(
         abbr=abbr,
         alignment_rules=alignment_rules,
         defensive_subs=defensive_subs,
+        relief=relief,
+        # The piggyback follows the opener before anyone is picked by leverage.
+        follow=tuple(str(a.id) for a in bulk),
     )
