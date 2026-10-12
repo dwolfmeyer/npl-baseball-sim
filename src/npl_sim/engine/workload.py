@@ -272,6 +272,8 @@ def game_card(
             for s in card.defensive_subs
             if s.player.id not in in_use and state.can_hit(s.player.id)
         ),
+        # Pinch hitters: bench bats with PA left who aren't starting today.
+        bench=tuple(h for h in team.bench if h.id not in in_use and state.can_hit(h.id)),
     )
     return game, moves
 
