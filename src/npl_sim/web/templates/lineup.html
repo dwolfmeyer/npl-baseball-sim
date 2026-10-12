@@ -10,18 +10,101 @@
 <script>
 // Re-check the card on every change: the server returns the re-rendered form
 // with its problems listed, and it replaces this one in place.
-document.addEventListener('change', async (ev) => {
-  const form = ev.target.closest('form[data-check]');
-  if (!form) return;
-  const focused = ev.target.name, value = ev.target.value;
+async function recheck(form, focusName, focusValue) {
   const resp = await fetch(form.dataset.check, {
     method: 'POST', body: new URLSearchParams(new FormData(form)), headers: {'HX-Request': 'true'},
   });
   if (!resp.ok) return;
   form.outerHTML = await resp.text();
-  const again = [...document.querySelectorAll(`form[data-check] [name="${focused}"]`)]
-    .find((el) => el.type !== 'checkbox' || el.value === value);
+  if (!focusName) return;
+  const again = [...document.querySelectorAll(`form[data-check] [name="${focusName}"]`)]
+    .find((el) => el.type !== 'checkbox' || el.value === focusValue);
   if (again) again.focus();
+}
+document.addEventListener('change', (ev) => {
+  const form = ev.target.closest('form[data-check]');
+  if (form) recheck(form, ev.target.name, ev.target.value);
 });
+
+// Batting order rows carry their slot number in their field names; after a
+// move, renumber them so the form posts the new order.
+function renumber(list) {
+  const side = list.dataset.side;
+  [...list.children].forEach((li, n) => {
+    const i = n + 1;
+    li.querySelector('.num').textContent = i;
+    const who = li.querySelector('select.who'), pos = li.querySelector('select.pos');
+    who.name = who.id = `${side}_player_${i}`;
+    pos.name = pos.id = `${side}_pos_${i}`;
+  });
+}
+
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-move]');
+  if (!btn) return;
+  const li = btn.closest('li.slot'), list = li.parentElement;
+  const sib = btn.dataset.move === '-1' ? li.previousElementSibling : li.nextElementSibling;
+  if (!sib) return;
+  btn.dataset.move === '-1' ? list.insertBefore(li, sib) : list.insertBefore(sib, li);
+  renumber(list);
+  recheck(list.closest('form'));
+});
+
+// Drag with pointer events so it works with a mouse and on touch screens.
+let drag = null;
+document.addEventListener('pointerdown', (ev) => {
+  const handle = ev.target.closest('[data-drag]');
+  if (!handle || ev.button > 0) return;
+  ev.preventDefault();
+  const kind = handle.dataset.drag;
+  const item = kind === 'row' ? handle.closest('li.slot') : handle;
+  const list = item.closest('section').querySelector('.order-list');
+  const box = item.getBoundingClientRect();
+  const ghost = item.cloneNode(true);
+  ghost.classList.add('ghost');
+  ghost.style.width = box.width + 'px';
+  ghost.style.left = box.left + 'px';
+  ghost.style.top = box.top + 'px';
+  document.body.appendChild(ghost);
+  item.classList.add('dragging');
+  drag = {kind, item, list, ghost, dx: ev.clientX - box.left, dy: ev.clientY - box.top, target: null};
+});
+document.addEventListener('pointermove', (ev) => {
+  if (!drag) return;
+  drag.ghost.style.left = ev.clientX - drag.dx + 'px';
+  drag.ghost.style.top = ev.clientY - drag.dy + 'px';
+  const under = document.elementFromPoint(ev.clientX, ev.clientY);
+  const row = under && under.closest('li.slot');
+  const target = row && row.parentElement === drag.list ? row : null;
+  if (drag.target && drag.target !== target) drag.target.classList.remove('over');
+  drag.target = target;
+  if (target && target !== drag.item) target.classList.add('over');
+  if (drag.kind === 'row' && target && target !== drag.item) {
+    const mid = target.getBoundingClientRect().top + target.offsetHeight / 2;
+    drag.list.insertBefore(drag.item, ev.clientY < mid ? target : target.nextElementSibling);
+    target.classList.remove('over');
+  }
+});
+function endDrag(ev) {
+  if (!drag) return;
+  const {kind, item, list, ghost, target} = drag;
+  drag = null;
+  ghost.remove();
+  item.classList.remove('dragging');
+  if (target) target.classList.remove('over');
+  if (ev.type === 'pointercancel') return;
+  if (kind === 'row') {
+    renumber(list);
+    recheck(list.closest('form'));
+  } else if (target) {
+    // A bench player takes the row's spot in the order; the row's player goes to the bench.
+    const who = target.querySelector('select.who');
+    if (![...who.options].some((o) => o.value === item.dataset.pid)) return;
+    who.value = item.dataset.pid;
+    recheck(list.closest('form'));
+  }
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
 </script>
 {% endblock %}

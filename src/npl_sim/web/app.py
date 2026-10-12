@@ -2,7 +2,8 @@
 
 Run it with `npl-sim web`. Rosters come from the NPL app database when
 `NPL_DATABASE_URL` is set, otherwise from a Django dump (`NPL_ROSTER_DUMP`,
-default the test fixture with the Ducksnorts and McFlys).
+default the current Ducksnorts and McFlys MLB rosters). Position eligibility
+and hands come from `data/eligibility/<season>.json` (`npl-sim eligibility`).
 """
 
 from __future__ import annotations
@@ -21,13 +22,15 @@ from npl_sim.engine.game import simulate_game
 from npl_sim.engine.playlog import game_log
 from npl_sim.league import load_league_file, team_slots
 from npl_sim.reporting import gameday
+from npl_sim.rosters import eligibility
+from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.rosters.sources import NPL_DATABASE_URL_ENV, players_from_database, players_from_dump
 from npl_sim.web import lineup
 from npl_sim.web.store import Store, slug
 
 ROSTER_DUMP_ENV = "NPL_ROSTER_DUMP"
-DEFAULT_DUMP = Path("tests/fixtures/npl_sample.json")
+DEFAULT_DUMP = Path("tests/fixtures/npl_2026_test_teams.json")
 SEASON = 2026
 
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -39,6 +42,9 @@ TEMPLATES.env.globals.update(
     roles=lineup.ROLES,
     active_limit=lineup.ACTIVE_LIMIT,
     rotation_size=lineup.ROTATION_SIZE,
+    pitch_limits=lineup.PITCH_LIMITS,
+    tto_hooks=lineup.TTO_HOOKS,
+    defense_rules=lineup.DEFENSE_RULES,
 )
 
 
@@ -52,10 +58,15 @@ def abbr(team: str) -> str:
     return team.split()[-1][:3].upper()
 
 
-def create_app(store: Store | None = None, players: list[NplPlayer] | None = None) -> FastAPI:
+def create_app(
+    store: Store | None = None,
+    players: list[NplPlayer] | None = None,
+    elig: Eligibility | None = None,
+) -> FastAPI:
     app = FastAPI(title="NPL Sim")
     store = store or Store()
     players = players if players is not None else load_players()
+    elig = elig if elig is not None else eligibility.load(SEASON)
     slots = team_slots(load_league_file().for_season(SEASON))
     rosters: dict[str, list[NplPlayer]] = {s.team: [] for s in slots}
     for p in players:
@@ -70,12 +81,23 @@ def create_app(store: Store | None = None, players: list[NplPlayer] | None = Non
 
     def card_for(team: str) -> tuple[lineup.LineupCard, bool]:
         saved = store.load_card(team)
-        return (saved, True) if saved else (lineup.default_card(rosters[team]), False)
+        return (saved, True) if saved else (lineup.default_card(rosters[team], elig), False)
+
+    def check(card: lineup.LineupCard, team: str) -> lineup.Check:
+        return lineup.validate(card, rosters[team], elig)
 
     def card_page(request: Request, team: str, card, check, saved: bool, status: int = 200):
         roster = rosters[team]
         hitters = [p for p in roster if not lineup.is_pitcher(p)]
         arms = [p for p in roster if lineup.is_pitcher(p)]
+        fields = {}
+        for h in hitters:
+            positions, from_games = lineup.fielding(h, elig)
+            fields[h.mlb_id] = {
+                "positions": [p for p in lineup.POSITIONS if p in positions],
+                "from_games": from_games,
+                "games": elig.games_text(h.mlb_id),
+            }
         return TEMPLATES.TemplateResponse(
             request,
             "partials/card.html" if request.headers.get("HX-Request") else "lineup.html",
@@ -88,6 +110,7 @@ def create_app(store: Store | None = None, players: list[NplPlayer] | None = Non
                 "saved_at": store.card_saved_at(team),
                 "hitters": hitters,
                 "arms": arms,
+                "fields": fields,
                 "active": set(card.active),
                 "rotation": [pid for pid in card.rotation if pid is not None],
             },
@@ -113,21 +136,21 @@ def create_app(store: Store | None = None, players: list[NplPlayer] | None = Non
     def lineup_card(request: Request, team_slug: str, saved: int = 0):
         team = team_for(team_slug)
         card, _ = card_for(team)
-        return card_page(request, team, card, lineup.validate(card, rosters[team]), bool(saved))
+        return card_page(request, team, card, check(card, team), bool(saved))
 
     @app.post("/teams/{team_slug}/lineup/check", response_class=HTMLResponse)
     async def check_card(request: Request, team_slug: str):
         team = team_for(team_slug)
         card = lineup.LineupCard.from_form(await request.form())
-        return card_page(request, team, card, lineup.validate(card, rosters[team]), False)
+        return card_page(request, team, card, check(card, team), False)
 
     @app.post("/teams/{team_slug}/lineup")
     async def save_card(request: Request, team_slug: str):
         team = team_for(team_slug)
         card = lineup.LineupCard.from_form(await request.form())
-        check = lineup.validate(card, rosters[team])
-        if not check.ok:
-            return card_page(request, team, card, check, False, status=422)
+        result = check(card, team)
+        if not result.ok:
+            return card_page(request, team, card, result, False, status=422)
         store.save_card(team, card)
         return RedirectResponse(f"/teams/{team_slug}/lineup?saved=1", status_code=303)
 
@@ -154,15 +177,19 @@ def create_app(store: Store | None = None, players: list[NplPlayer] | None = Non
         cards = {}
         for side, team in (("away", away), ("home", home)):
             card, _ = card_for(team)
-            check = lineup.validate(card, rosters[team])
-            if not check.ok:
-                raise HTTPException(400, f"{team}'s lineup card has errors: {check.errors[0]}")
+            result = check(card, team)
+            if not result.ok:
+                raise HTTPException(400, f"{team}'s lineup card has errors: {result.errors[0]}")
             cards[side] = card
-        starters = {}
+        # Who throws the first pitch (an opener when the plan has one) sets the
+        # other team's batting order.
+        starters, first = {}, {}
         for side, team in (("away", away), ("home", home)):
-            ids = [pid for pid in cards[side].rotation if pid is not None]
-            pid = ids[slot[side] % len(ids)]
-            starters[side] = next(p for p in rosters[team] if p.mlb_id == pid)
+            by_id = {p.mlb_id: p for p in rosters[team]}
+            slots = [(i, pid) for i, pid in enumerate(cards[side].rotation) if pid is not None]
+            i, pid = slots[slot[side] % len(slots)]
+            starters[side] = by_id[pid]
+            first[side] = by_id.get(cards[side].plan(i).opener) or by_id[pid]
         teams = {
             side: lineup.team_card(
                 team,
@@ -170,7 +197,8 @@ def create_app(store: Store | None = None, players: list[NplPlayer] | None = Non
                 cards[side],
                 rosters[team],
                 slot[side],
-                (starters["home" if side == "away" else "away"].throws or "R"),
+                (first["home" if side == "away" else "away"].throws or "R"),
+                elig,
             )
             for side, team in (("away", away), ("home", home))
         }
@@ -181,7 +209,11 @@ def create_app(store: Store | None = None, players: list[NplPlayer] | None = Non
                 "away": away,
                 "home": home,
                 "seed": seed,
-                "starters": {s: starters[s].name for s in starters},
+                "starters": {
+                    s: starters[s].name
+                    + (f" (opener {first[s].name})" if first[s] is not starters[s] else "")
+                    for s in starters
+                },
                 "runs": {"away": box.runs[away], "home": box.runs[home]},
                 "events": events,
             }
