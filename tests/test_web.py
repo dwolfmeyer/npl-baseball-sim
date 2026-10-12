@@ -13,6 +13,7 @@ from npl_sim.web.lineup import (
     POSITIONS,
     DefensiveSub,
     LineupCard,
+    ReliefPlan,
     StarterPlan,
     autofill,
     default_card,
@@ -168,6 +169,12 @@ def form_for(card: LineupCard) -> dict:
             data[f"def_{key}"] = "1"
     for pid, role in card.roles.items():
         data[f"role_{pid}"] = role
+    for pid, rp in card.relief.items():
+        data[f"rp_use_{pid}"] = rp.usage
+        data[f"rp_vs_{pid}"] = rp.vs or ""
+        data[f"rp_outs_{pid}"] = str(rp.max_outs or "")
+        if rp.start_of_inning_only:
+            data[f"rp_clean_{pid}"] = "1"
     return data
 
 
@@ -347,3 +354,27 @@ def test_bullpen_grouped_by_role_for_dragging(client):
     group = page.split('data-role-group="CL"')[1].split("</tbody>")[0]
     assert f'data-pid="{closer}"' in group
     assert 'data-role-group=""' in page and page.count('data-drag="sp"') == 5
+
+
+def test_reliever_usage_round_trip(client):
+    card = default_card(roster(DUCKS), ELIG)
+    pen = [pid for pid in card.roles]
+    card.relief = {
+        pen[0]: ReliefPlan(usage="mopup", max_outs=9),
+        pen[1]: ReliefPlan(vs="L", max_outs=1, start_of_inning_only=True),
+    }
+    back = LineupCard.from_form(
+        {k: v if isinstance(v, list) else [v] for k, v in form_for(card).items()}
+    )
+    assert back.relief == card.relief
+    assert LineupCard.from_json(card.to_json()).relief == card.relief
+
+    resp = client.post(
+        "/teams/midwest-ducksnorts/lineup/check",
+        data=form_for(card),
+        headers={"HX-Request": "true"},
+    )
+    html = resp.text
+    assert f'name="rp_use_{pen[0]}"' in html and "Mop-up (blowouts)" in html
+    use = html.split(f'name="rp_use_{pen[0]}"')[1].split("</select>")[0]
+    assert '<option value="mopup" selected>' in use
