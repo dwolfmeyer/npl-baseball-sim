@@ -52,5 +52,18 @@ into the Monday-Sunday weeks in `config/calendar.yaml` with OR-Tools CP-SAT,
 and validates the result before saving. Division rivals default to the first
 two and last two teams listed; set `rivals` on a division to change them.
 
+### Game engine
+
+`src/npl_sim/engine` is a pure library: frozen player cards, lineups, park
+and league environment in; an event log out. Box scores and play-by-play are
+derived from that log only. Each PA combines batter and pitcher with
+multinomial log5 against the league rate for that handedness matchup, then
+applies fatigue, catcher framing, park (the only place park factors enter)
+and defense/alignment once each.
+
+```sh
+npl-sim demo-game --seed 3 --pbp   # two league-average teams
+```
+
 League structure lives in `config/league.yaml`. When divisions realign, add a
 new alignment block with its `from_season`; past seasons keep their divisions.

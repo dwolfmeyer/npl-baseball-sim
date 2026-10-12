@@ -1,5 +1,5 @@
 """Command line entry point: `npl-sim league-check`, `sync-league`, `import-rosters`,
-`generate-schedule`."""
+`generate-schedule`, `demo-game`."""
 
 from __future__ import annotations
 
@@ -46,6 +46,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     sched.add_argument("--seed", type=int, default=0, help="solver seed")
     sched.add_argument("--csv", help="also write the games to this CSV file")
     sched.add_argument("--save", action="store_true", help="write weeks and games to the DB")
+
+    demo = sub.add_parser("demo-game", help="sim one game between two average teams")
+    demo.add_argument("--seed", type=int, default=1)
+    demo.add_argument("--pbp", action="store_true", help="also print play-by-play")
 
     args = parser.parse_args(argv)
     league_file = load_league_file()
@@ -98,6 +102,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sync_alignment(session, league_file, args.season)
                 n = save_schedule(session, args.season, weeks, schedule)
             print(f"Saved {n} games")
+    elif args.cmd == "demo-game":
+        from npl_sim.engine.box import box_score, format_box
+        from npl_sim.engine.defaults import DEFAULT_ENV
+        from npl_sim.engine.game import simulate_game
+        from npl_sim.engine.sample import average_team
+
+        events = simulate_game(average_team("Away"), average_team("Home"), DEFAULT_ENV, args.seed)
+        box = box_score(events, "Away", "Home")
+        print(format_box(box))
+        if args.pbp:
+            print("\n" + "\n".join(box.play_by_play))
     return 0
 
 
