@@ -26,7 +26,7 @@ def _workbook(path):
     wb = Workbook()
     wb.active.title = "Key"
     for team in TEAMS:
-        nick = "Rats" if team == "Absolute Sickos" else team.split()[-1]
+        nick = team.split()[-1]
         rows = [[1, "Arm, Some", 1, 100000 + len(wb.sheetnames), "RHP", "NYY"]]
         if team == "Midwest Ducksnorts":
             rows = [
@@ -52,7 +52,7 @@ def _workbook(path):
 def test_tabs_match_config_teams():
     assert team_for_tab("Ducksnorts #12", TEAMS) == "Midwest Ducksnorts"
     assert team_for_tab("Guys #21", TEAMS) == "Bad Guys"
-    assert team_for_tab("Rats #8", TEAMS) == "Absolute Sickos"
+    assert team_for_tab("Rats #8", TEAMS) == "Rats"
     assert team_for_tab("Nobody #99", TEAMS) is None
 
 
@@ -71,7 +71,8 @@ def test_workbook_sections_become_npl_app_flags(tmp_path):
     assert ducks["Nate Dohm"].tier is RosterTier.A
     assert "Aplayer Not" not in ducks
     assert book.divisions["Midwest Ducksnorts"] == "AL Sultan of Swat"
-    assert any(m.startswith("Midwest Ducksnorts:") for m in book.division_mismatches(ALIGNMENT))
+    assert not any(m.startswith("Midwest Ducksnorts:") for m in book.division_mismatches(ALIGNMENT))
+    assert any(m.startswith("Asbury Park Bosses:") for m in book.division_mismatches(ALIGNMENT))
 
     # The dump reads back exactly like the NPL app's own export.
     path = write_dump(book.players, tmp_path / "npl.json")

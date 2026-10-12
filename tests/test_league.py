@@ -21,15 +21,15 @@ def test_shipped_config_has_24_teams_in_six_divisions():
     assert all(league.dh for league in alignment.leagues)
 
 
-def test_test_teams_are_where_the_spec_puts_them():
+def test_test_teams_are_where_the_roster_workbook_puts_them():
     slots = {s.team: s for s in team_slots(load_league_file().for_season(2026))}
     assert (slots["Midwest Ducksnorts"].league, slots["Midwest Ducksnorts"].division) == (
         "AL",
-        "Splendid Splinter",
+        "Sultan of Swat",
     )
     assert (slots["Hill Valley McFlys"].league, slots["Hill Valley McFlys"].division) == (
-        "AL",
-        "Oil Can",
+        "NL",
+        "Say Hey Kid",
     )
 
 
@@ -58,7 +58,7 @@ def test_realignment_picks_latest_alignment_for_season(raw):
     def div_of(season, team):
         return {s.team: s.division for s in team_slots(lf.for_season(season))}[team]
 
-    assert div_of(2027, "Milwaukee DockHounds") == "Oil Can"
-    assert div_of(2028, "Milwaukee DockHounds") == "Splendid Splinter"
+    assert div_of(2027, "Asbury Park Bosses") == "Oil Can"
+    assert div_of(2028, "Asbury Park Bosses") == "Splendid Splinter"
     with pytest.raises(LookupError):
         lf.for_season(2025)

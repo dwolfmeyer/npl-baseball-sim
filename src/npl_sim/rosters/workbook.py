@@ -51,11 +51,7 @@ ACTIVE_HEADERS = (
 END_HEADER = "FINANCIALS"
 
 # Tab nicknames that don't end a team name in config/league.yaml.
-TEAM_ALIASES = {
-    # "Rats #8" (new regime in 2026) sits in the NL Stan The Man slot that
-    # the league config calls Absolute Sickos.
-    "Rats": "Absolute Sickos",
-}
+TEAM_ALIASES: dict[str, str] = {}
 
 _DIVISION = re.compile(r"(AMERICAN|NATIONAL) LEAGUE\s+(.+?) DIVISION", re.S)
 
