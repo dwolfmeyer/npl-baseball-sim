@@ -307,6 +307,35 @@ def test_defensive_subs_round_trip_and_checks():
     assert "Pick a field position" in errors
 
 
+def test_defensive_subs_reach_the_engine():
+    r = roster(DUCKS)
+    card = default_card(r, ELIG)
+    rhp = {pid for pid, _ in card.orders["rhp"]}
+    lhp = {pid for pid, _ in card.orders["lhp"]}
+    bench = [
+        p.mlb_id for p in r if p.mlb_id in card.active and p.mlb_id not in rhp and not p.throws
+    ]
+    leadoff = card.orders["rhp"][0][0]
+    card.subs = [
+        DefensiveSub(player=bench[0], position="LF", replaces=leadoff, from_inning=8),
+        DefensiveSub(player=bench[1], position="CF", only_when_leading=False),
+    ]
+    subs = team_card("Ducks", "MDK", card, r, 0, "R", ELIG).defensive_subs
+    assert [(s.player.id, s.position, s.from_inning, s.replaces) for s in subs] == [
+        (str(bench[0]), "LF", 8, str(leadoff)),
+        (str(bench[1]), "CF", 9, None),
+    ]
+    assert not subs[1].only_when_leading
+    # A sub who starts vs LHP, or one only for a starter sitting then, is skipped.
+    vs_lhp = team_card("Ducks", "MDK", card, r, 0, "L", ELIG).defensive_subs
+    expected = [
+        sub.player
+        for sub in card.subs
+        if sub.player not in lhp and (sub.replaces is None or sub.replaces in lhp)
+    ]
+    assert [int(s.player.id) for s in vs_lhp] == expected
+
+
 def test_picked_players_drop_out_of_other_dropdowns(client):
     page = client.get("/teams/midwest-ducksnorts/lineup").text
     card = default_card(roster(DUCKS), ELIG)

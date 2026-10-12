@@ -15,8 +15,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
 
-from npl_sim.eligibility import LISTED_FALLBACK
+from npl_sim.eligibility import FIELD_POSITIONS, LISTED_FALLBACK
 from npl_sim.engine.alignment import AlignmentRule
+from npl_sim.engine.game import DefensiveSub as EngineSub
 from npl_sim.engine.game import TeamCard
 from npl_sim.engine.sample import hitter, pitcher
 from npl_sim.rosters.eligibility import Eligibility
@@ -509,12 +510,31 @@ def team_card(
     pen by role."""
     by_id = {p.mlb_id: p for p in roster}
     side = "lhp" if opposing_throws == "L" else "rhp"
-    lineup = []
-    for pid, pos in card.orders[side]:
+
+    def bat(pid: int):
         rec = elig.players.get(pid) if elig else None
         # Right-handed when the hand isn't known yet.
         bats = rec.bats if rec and rec.bats in ("L", "R", "S") else "R"
-        lineup.append((replace(hitter(str(pid), bats=bats), name=by_id[pid].name), pos))
+        return replace(hitter(str(pid), bats=bats), name=by_id[pid].name)
+
+    lineup = [(bat(pid), pos) for pid, pos in card.orders[side]]
+    starting = {pid for pid, _ in card.orders[side]}
+    # Subs who start today, or who are only for a starter sitting today, stay out.
+    defensive_subs = tuple(
+        EngineSub(
+            player=bat(sub.player),
+            position=sub.position,
+            from_inning=sub.from_inning,
+            only_when_leading=sub.only_when_leading,
+            replaces=str(sub.replaces) if sub.replaces else None,
+        )
+        for sub in card.subs
+        if sub.player in by_id
+        and sub.player in card.active
+        and sub.player not in starting
+        and sub.position in FIELD_POSITIONS
+        and (sub.replaces is None or sub.replaces in starting)
+    )
     alignment_rules = tuple(
         rule for key, rule in DEFENSE_ENGINE_RULES.items() if card.defense.get(key)
     )
@@ -551,4 +571,5 @@ def team_card(
         bullpen=bullpen,
         abbr=abbr,
         alignment_rules=alignment_rules,
+        defensive_subs=defensive_subs,
     )

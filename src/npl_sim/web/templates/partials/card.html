@@ -146,7 +146,7 @@
 
 <section class="card">
   <h2>Defensive replacements</h2>
-  <p class="muted small">Bring a bench player in late for defense. Leave "Replaces" on "Whoever plays there" to sub for anyone at that position, or pick one starter to sub only for him. Saved on the card; the engine makes the switch once its substitution logic lands.</p>
+  <p class="muted small">Bring a bench player in late for defense. Leave "Replaces" on "Whoever plays there" to sub for anyone at that position, or pick one starter to sub only for him. He comes in at the top of the inning when the conditions fit; a replacement who starts that day, or one only for a starter who sits, is skipped.</p>
   {% set starting = card.orders.values() | map("map", attribute=0) | map("list") | sum(start=[]) %}
   {% set sub_ids = card.subs | map(attribute="player") | list %}
   {% set rhp_ids = card.orders.get("rhp", []) | map(attribute=0) | list %}
