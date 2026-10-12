@@ -156,6 +156,42 @@
 </div>
 
 <section class="card">
+  <h2>Manager style and pinch hitting</h2>
+  <input type="hidden" name="style_prev" value="{{ card.style }}">
+  <input type="hidden" name="ph_form" value="1">
+  <label class="field wide">Manager style
+    <select id="style" name="style">
+      {% for name, s in styles.items() %}<option value="{{ name }}" {% if name == card.style %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+    </select>
+  </label>
+  <p class="muted small">Picking a style fills every starter's hooks in the rotation and the pinch-hitting settings below. You can change any of them after. A bench bat pinch-hits for the batter due up only when every setting here allows it and he's expected to do clearly better against the pitcher on the mound.</p>
+  {% set ph = card.pinch %}
+  <label class="check"><input type="checkbox" id="ph_on" name="ph_on" value="1" {% if ph.enabled %}checked{% endif %}> Pinch-hit</label>
+  <fieldset class="pinch{% if not ph.enabled %} off{% endif %}">
+    <label class="field">From inning
+      <select name="ph_inning">{% for n in pinch_innings %}<option value="{{ n }}" {% if n == ph.from_inning %}selected{% endif %}>{{ n }}th{% if n == 9 %} only{% else %} on{% endif %}</option>{% endfor %}</select>
+    </label>
+    <label class="field">Spot at least
+      <select name="ph_li">{% for v, text in pinch_leverage.items() %}<option value="{{ v }}" {% if v == ph.min_leverage %}selected{% endif %}>{{ text }}</option>{% endfor %}</select>
+    </label>
+    <label class="field">Expected gain at least
+      <select name="ph_gain">{% for v, text in pinch_gains.items() %}<option value="{{ v }}" {% if v == ph.min_gain %}selected{% endif %}>{{ text }}</option>{% endfor %}</select>
+    </label>
+    <label class="field">Most per game
+      <select name="ph_max">{% for n in pinch_max %}<option value="{{ n }}" {% if n == ph.max_per_game %}selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+    </label>
+    <label class="check"><input type="checkbox" name="ph_platoon" value="1" {% if ph.platoon_only %}checked{% endif %}> Only for the platoon edge</label>
+    <label class="check"><input type="checkbox" name="ph_oop" value="1" {% if ph.out_of_position %}checked{% endif %}> Allow a pinch hitter who must then play out of position</label>
+    <p class="muted small">Never pinch-hit for:</p>
+    <div class="never">
+    {% for h in hitters if h.mlb_id in active %}
+      <label class="check"><input type="checkbox" name="ph_never" value="{{ h.mlb_id }}" {% if h.mlb_id in ph.never_for %}checked{% endif %}> {{ h.name }}</label>
+    {% endfor %}
+    </div>
+  </fieldset>
+</section>
+
+<section class="card">
   <h2>Defensive replacements</h2>
   <p class="muted small">Bring a bench player in late for defense. Leave "Replaces" on "Whoever plays there" to sub for anyone at that position, or pick one starter to sub only for him. He comes in at the top of the inning when the conditions fit; a replacement who starts that day, or one only for a starter who sits, is skipped.</p>
   {% set starting = card.orders.values() | map("map", attribute=0) | map("list") | sum(start=[]) %}

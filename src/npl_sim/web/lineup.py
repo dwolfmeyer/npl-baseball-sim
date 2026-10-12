@@ -27,6 +27,7 @@ from npl_sim.engine.hooks import (
     DEFAULT_MAX_RUNS,
     StarterHook,
 )
+from npl_sim.engine.manager import DEFAULT_STYLE, STYLES, PinchHitting
 from npl_sim.engine.sample import hitter, pitcher
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
@@ -50,9 +51,15 @@ TTO_HOOKS = {
 # Pull the starter once he's been charged with this many runs (None = off).
 RUN_HOOKS = {None: "Off", **{n: f"{n} runs" for n in range(3, 9)}}
 # Pull him in a big spot: leverage index at or above this (None = off).
-LEVERAGE_HOOKS = {None: "Off", 1.5: "LI 1.5+", 2.0: "LI 2.0+", 2.5: "LI 2.5+"}
+LEVERAGE_HOOKS = {None: "Off", **{x: f"LI {x}+" for x in (1.5, 1.8, 2.0, 2.5)}}
 LEVERAGE_INNINGS = range(5, 9)
 OPENER_PITCHES = 25
+# Pinch hitting (engine/manager.py): the card's choices for each setting.
+PINCH_INNINGS = range(5, 10)
+PINCH_LEVERAGE = {x: f"LI {x}+" for x in (1.0, 1.2, 1.5, 1.8, 2.0, 2.5, 3.0)}
+# Expected gain in runs per PA, shown as about wOBA points (0.015 runs is ~18).
+PINCH_GAINS = {x: f"+{round(x * 1200)} wOBA points" for x in (0.008, 0.015, 0.020, 0.030)}
+PINCH_MAX = range(1, 5)
 DEFENSE_RULES = {
     "infield_in": "Infield in with a runner on 3rd and fewer than 2 outs, "
     "7th inning or later, tied or within a run",
@@ -129,6 +136,45 @@ class StarterPlan:
 
 
 @dataclass
+class PinchPlan:
+    """The owner's pinch-hitting rules (engine PinchHitting), editable on the card."""
+
+    enabled: bool = True
+    from_inning: int = 7
+    min_leverage: float = 2.0
+    platoon_only: bool = True
+    min_gain: float = 0.015
+    max_per_game: int = 2
+    out_of_position: bool = False
+    never_for: list[int] = field(default_factory=list)
+
+    @classmethod
+    def of(cls, rule: PinchHitting) -> PinchPlan:
+        return cls(
+            enabled=rule.enabled,
+            from_inning=rule.from_inning,
+            min_leverage=rule.min_leverage,
+            platoon_only=rule.platoon_only,
+            min_gain=rule.min_gain,
+            max_per_game=rule.max_per_game,
+            out_of_position=rule.out_of_position,
+            never_for=[int(i) for i in rule.never_for if str(i).isdigit()],
+        )
+
+    def rule(self) -> PinchHitting:
+        return PinchHitting(
+            enabled=self.enabled,
+            from_inning=self.from_inning,
+            min_leverage=self.min_leverage,
+            platoon_only=self.platoon_only,
+            min_gain=self.min_gain,
+            max_per_game=self.max_per_game,
+            out_of_position=self.out_of_position,
+            never_for=tuple(str(i) for i in self.never_for),
+        )
+
+
+@dataclass
 class DefensiveSub:
     """A late-game defensive replacement: `player` comes off the bench to play
     `position` from `from_inning` on, replacing `replaces` (a specific starter)
@@ -184,6 +230,27 @@ class LineupCard:
     defense: dict[str, bool] = field(default_factory=dict)  # DEFENSE_RULES key -> on
     subs: list[DefensiveSub] = field(default_factory=list)
     relief: dict[int, ReliefPlan] = field(default_factory=dict)  # reliever id -> usage
+    # Manager style (engine/manager.py STYLES): a preset for the starters'
+    # hooks and the pinch-hitting rules, which the owner can then edit.
+    style: str = DEFAULT_STYLE
+    pinch: PinchPlan = field(default_factory=lambda: PinchPlan.of(STYLES[DEFAULT_STYLE].pinch))
+
+    def apply_style(self, name: str) -> None:
+        """Fill every rotation slot's hook and the pinch-hitting rules from a style."""
+        preset = STYLES[name]
+        self.style = name
+        hook = preset.hook
+        self.plans = [
+            replace(
+                self.plan(i),
+                tto_hook=hook.times_through,
+                max_runs=hook.max_runs,
+                leverage=hook.leverage,
+                leverage_from_inning=hook.leverage_from_inning,
+            )
+            for i in range(ROTATION_SIZE)
+        ]
+        self.pinch = replace(PinchPlan.of(preset.pinch), never_for=list(self.pinch.never_for))
 
     def relief_plan(self, pid: int) -> ReliefPlan:
         return self.relief.get(pid) or ReliefPlan()
@@ -201,6 +268,8 @@ class LineupCard:
             "defense": self.defense,
             "subs": [asdict(sub) for sub in self.subs],
             "relief": {str(k): asdict(v) for k, v in self.relief.items()},
+            "style": self.style,
+            "pinch": asdict(self.pinch),
         }
 
     @classmethod
@@ -214,6 +283,10 @@ class LineupCard:
             defense={k: bool(v) for k, v in data.get("defense", {}).items() if k in DEFENSE_RULES},
             subs=[DefensiveSub(**sub) for sub in data.get("subs", [])],
             relief={int(k): ReliefPlan(**v) for k, v in data.get("relief", {}).items()},
+            style=data.get("style") if data.get("style") in STYLES else DEFAULT_STYLE,
+            pinch=PinchPlan(**data["pinch"])
+            if "pinch" in data
+            else PinchPlan.of(STYLES[DEFAULT_STYLE].pinch),
         )
 
     @classmethod
@@ -239,7 +312,10 @@ class LineupCard:
                 return default
             return value if value in options else default
 
-        active = form.getlist("active") if hasattr(form, "getlist") else form.get("active", [])
+        def getlist(key: str) -> list:
+            return form.getlist(key) if hasattr(form, "getlist") else form.get(key, [])
+
+        active = getlist("active")
         orders = {
             side: [(pid(f"{side}_player_{i}"), get(f"{side}_pos_{i}")) for i in range(1, 10)]
             for side in SIDES
@@ -274,7 +350,23 @@ class LineupCard:
                 )
                 if not plan.is_default():
                     relief[int(rid)] = plan
-        return cls(
+        # Forms without the pinch-hitting fields (older pages) keep the defaults.
+        pinch = (
+            PinchPlan.of(STYLES[DEFAULT_STYLE].pinch)
+            if not get("ph_form")
+            else PinchPlan(
+                enabled=bool(get("ph_on")),
+                from_inning=choice("ph_inning", PINCH_INNINGS, int, 7),
+                min_leverage=choice("ph_li", PINCH_LEVERAGE, float, 2.0),
+                platoon_only=bool(get("ph_platoon")),
+                min_gain=choice("ph_gain", PINCH_GAINS, float, 0.015),
+                max_per_game=choice("ph_max", PINCH_MAX, int, 2),
+                out_of_position=bool(get("ph_oop")),
+                never_for=[int(i) for i in getlist("ph_never") if str(i).isdigit()],
+            )
+        )
+        style = get("style") if get("style") in STYLES else DEFAULT_STYLE
+        card = cls(
             active=[int(a) for a in active if str(a).isdigit()],
             orders=orders,
             rotation=rotation,
@@ -293,7 +385,13 @@ class LineupCard:
                 if (player := pid(f"sub_player_{i}")) is not None
             ],
             relief=relief,
+            style=style,
+            pinch=pinch,
         )
+        # A newly picked style is a preset: it fills the hooks and pinch rules.
+        if get("style_prev") and get("style_prev") != style:
+            card.apply_style(style)
+        return card
 
 
 @dataclass
@@ -652,6 +750,13 @@ def team_card(
         defensive_subs=defensive_subs,
         hook=plan.hook(),
         relief=relief,
+        # Pinch hitters: active hitters not starting today.
+        bench=tuple(
+            bat(p.mlb_id)
+            for p in roster
+            if p.mlb_id in card.active and p.mlb_id not in starting and not is_pitcher(p)
+        ),
+        pinch=card.pinch.rule(),
         # The piggyback follows the opener before anyone is picked by leverage.
         follow=tuple(str(a.id) for a in bulk),
     )
