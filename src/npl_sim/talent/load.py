@@ -23,8 +23,10 @@ READ_COLUMNS = [
     "pitch_type", "release_speed",
 ]  # fmt: skip
 PRIOR_SEASONS = 2
-# FanGraphs pitch codes that differ from Statcast's.
-FG_PITCH = {"FA": "FF", "CS": "CU"}
+# FanGraphs' per-pitch Stuff+ columns (sp_s_CH, _CU, _FC, _FF, _FO, _FS, _KC,
+# _SI, _SL) use Statcast codes but fold sweepers and slurves into SL and CU;
+# fold the pitch data the same way so counts line up.
+STATCAST_TO_FG = {"ST": "SL", "SV": "CU", "FA": "FF", "CS": "CU"}
 SPRINT_AVERAGE, SPRINT_SD = 27.0, 1.5  # ft/s
 
 
@@ -134,11 +136,11 @@ def stuff_by_pitcher(board: pd.DataFrame, pitches: pd.DataFrame) -> dict[str, fl
     per_pitch = {
         m.group(1): c for c in board.columns if (m := re.fullmatch(r"sp_s_([A-Za-z]{2})", c))
     }
-    counts = (
-        pitches.groupby(["pitcher", "pitch_type"]).size()
-        if not pitches.empty and "pitch_type" in pitches
-        else pd.Series(dtype=int)
-    )
+    if not pitches.empty and "pitch_type" in pitches:
+        kinds = pitches["pitch_type"].replace(STATCAST_TO_FG)
+        counts = pitches.assign(pitch_type=kinds).groupby(["pitcher", "pitch_type"]).size()
+    else:
+        counts = pd.Series(dtype=int)
     out = {}
     for _, row in board.iterrows():
         pid = row.get("mlbam_id")
@@ -146,7 +148,7 @@ def stuff_by_pitcher(board: pd.DataFrame, pitches: pd.DataFrame) -> dict[str, fl
             continue
         pid = int(pid)
         mine = counts.loc[pid].to_dict() if pid in counts.index.get_level_values(0) else {}
-        values = {FG_PITCH.get(code, code): _num(row[col]) for code, col in per_pitch.items()}
+        values = {code: _num(row[col]) for code, col in per_pitch.items()}
         s = tb.stuff_plus(values, mine, _num(row.get("sp_stuff")))
         if s is not None:
             out[str(pid)] = s

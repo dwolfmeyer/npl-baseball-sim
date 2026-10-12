@@ -133,9 +133,13 @@ def test_stuff_plus_regressed_by_pitch_count():
     assert 105 < wild < 112  # three sliders can't make him elite
     assert tb.stuff_plus({}, {"FF": 50}, overall=120.0) == pytest.approx(105.0)
     assert tb.stuff_plus({}, {}, overall=None) is None
-    board = pd.DataFrame({"mlbam_id": [9], "sp_stuff": [104.0], "sp_s_FA": [130.0]})
-    p = pd.DataFrame({"pitcher": [9] * 300, "pitch_type": ["FF"] * 300})
-    assert stuff_by_pitcher(board, p)["9"] == pytest.approx(100 + 30 * 300 / 450)
+    board = pd.DataFrame(
+        {"mlbam_id": [9], "sp_stuff": [104.0], "sp_s_FF": [130.0], "sp_s_SL": [90.0]}
+    )
+    p = pd.DataFrame({"pitcher": [9] * 400, "pitch_type": ["FF"] * 300 + ["ST"] * 100})
+    ff = 100 + 30 * 300 / 450
+    sl = 100 - 10 * 100 / 250  # sweepers count as sliders, as FanGraphs files them
+    assert stuff_by_pitcher(board, p)["9"] == pytest.approx(0.75 * ff + 0.25 * sl)
 
 
 def test_cards_from_talent():
