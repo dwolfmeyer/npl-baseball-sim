@@ -338,3 +338,12 @@ def test_any_player_any_position_and_no_closer_needed(client):
     card.roles = {pid: ("MR" if role == "CL" else role) for pid, role in card.roles.items()}
     check = validate(card, roster(DUCKS), ELIG)
     assert check.ok, check.errors
+
+
+def test_bullpen_grouped_by_role_for_dragging(client):
+    page = client.get("/teams/midwest-ducksnorts/lineup").text
+    card = default_card(roster(DUCKS), ELIG)
+    closer = next(pid for pid, role in card.roles.items() if role == "CL")
+    group = page.split('data-role-group="CL"')[1].split("</tbody>")[0]
+    assert f'data-pid="{closer}"' in group
+    assert 'data-role-group=""' in page and page.count('data-drag="sp"') == 5
