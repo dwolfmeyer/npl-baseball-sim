@@ -50,6 +50,11 @@ ACTIVE_HEADERS = (
 )
 END_HEADER = "FINANCIALS"
 
+# MLBAM IDs the workbook has wrong, by the ID it lists. Jim Jarvis (Bears,
+# SS, ATL) is listed as 80537, which the MLB Stats API doesn't know; his ID
+# is 805347 (debut 2026-05-06), found by the eligibility pull 2026-10-12.
+MLBAM_FIXES = {80537: 805347}
+
 # Tab nicknames that don't end a team name in config/league.yaml.
 TEAM_ALIASES: dict[str, str] = {}
 
@@ -133,6 +138,7 @@ def read_tab(rows, team: str) -> tuple[list[NplPlayer], str | None]:
         on_40 = isinstance(a, int | float) and a > 0
         flags = {f for f in ("roster_40man" if on_40 else None, section) if f}
         mlb_id = parse_mlb_id(int(d) if isinstance(d, float) else d)
+        mlb_id = MLBAM_FIXES.get(mlb_id, mlb_id)
         ss = int(c) if isinstance(c, float) else c
         players.append(
             NplPlayer(
