@@ -44,6 +44,8 @@
       <option value="{{ p }}" {% if p == pos %}selected{% endif %}>{{ p }}{% if pid and p != "DH" and p not in eligible %} · out of pos{% if pid in fields %}, {{ "%+d"|format(fields[pid].costs[p]) }}{% endif %}{% endif %}</option>
       {% endfor %}
     </select>
+    {% set ln = fields[pid].lines[side] if pid in fields else none %}
+    <span class="line" {% if ln %}title="{{ ln.pa }} PA {{ label }}: AVG/OBP/SLG"{% endif %}>{% if ln %}{{ ln.text() }}{% elif pid %}<span class="muted">no PA</span>{% endif %}</span>
     <span class="moves">
       <button type="button" class="mv" data-move="-1" aria-label="Move batter {{ i }} up">▲</button>
       <button type="button" class="mv" data-move="1" aria-label="Move batter {{ i }} down">▼</button>
@@ -54,7 +56,7 @@
   <div class="bench">
     <span class="muted small">Bench</span>
     {% for h in hitters %}{% if h.mlb_id in active and h.mlb_id not in in_order %}
-    <span class="chip" data-drag="chip" data-pid="{{ h.mlb_id }}" title="{{ fields[h.mlb_id].games }}">{{ h.name }} <small>{{ fields[h.mlb_id].positions | join(" ") or "DH" }}</small></span>
+    <span class="chip" data-drag="chip" data-pid="{{ h.mlb_id }}" title="{{ fields[h.mlb_id].games }}">{% set ln = fields[h.mlb_id].lines[side] %}{{ h.name }} <small>{{ fields[h.mlb_id].positions | join(" ") or "DH" }}{% if ln %} · {{ ln.text() }}{% endif %}</small></span>
     {% endif %}{% endfor %}
   </div>
 </section>
@@ -189,6 +191,28 @@
       <td><input type="checkbox" id="sub_leading_{{ i + 1 }}" name="sub_leading_{{ i + 1 }}" value="1" aria-label="Only when leading, replacement {{ i + 1 }}" {% if not sub or sub.only_when_leading %}checked{% endif %}></td>
     </tr>
     {% endfor %}
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>Hitting and fielding</h2>
+  <p class="muted small">{{ stats_source }} AVG/OBP/SLG against each side, with plate appearances. Fielding grades are on the 20-80 scale (50 is average) at each position as the sim rates him there; his eligible positions are in bold, and elsewhere the grade includes the out-of-position cost.</p>
+  <div class="wrap"><table class="stats">
+    <thead><tr><th>Hitter</th>{% for side, label in sides.items() %}<th>{{ label }}</th>{% endfor %}{% for p in positions if p != "DH" %}<th class="g">{{ p }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for h in hitters if h.mlb_id in active %}
+    {% set f = fields[h.mlb_id] %}
+    <tr>
+      <td>{{ h.name }}</td>
+      {% for side in sides %}{% set ln = f.lines[side] %}
+      <td>{% if ln %}{{ ln.text() }} <span class="muted small">{{ ln.pa }} PA</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      {% endfor %}
+      {% for p in positions if p != "DH" %}
+      <td class="g">{% if p in f.positions %}<b>{{ f.grades[p] }}</b>{% else %}<span class="muted">{{ f.grades[p] }}</span>{% endif %}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+    </tbody>
   </table></div>
 </section>
 

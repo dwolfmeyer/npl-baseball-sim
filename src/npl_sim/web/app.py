@@ -28,7 +28,7 @@ from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.rosters.sources import NPL_DATABASE_URL_ENV, players_from_database, players_from_dump
 from npl_sim.simweek import round_robin, sim_week
-from npl_sim.web import lineup
+from npl_sim.web import lineup, stats
 from npl_sim.web.store import Store, slug
 
 ROSTER_DUMP_ENV = "NPL_ROSTER_DUMP"
@@ -73,6 +73,7 @@ def create_app(
     store: Store | None = None,
     players: list[NplPlayer] | None = None,
     elig: Eligibility | None = None,
+    clean_root: Path | str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="NPL Sim")
     store = store or Store()
@@ -84,6 +85,8 @@ def create_app(
         if p.team in rosters and p.is_active_mlb and p.mlb_id is not None:
             rosters[p.team].append(p)
     by_slug = {slug(t): t for t in rosters}
+    clean_root = clean_root or os.environ.get(stats.CLEAN_ROOT_ENV) or stats.DEFAULT_CLEAN_ROOT
+    splits = stats.SplitsCache(clean_root, SEASON)
 
     def team_for(team_slug: str) -> str:
         if team_slug not in by_slug or not rosters[by_slug[team_slug]]:
@@ -102,6 +105,7 @@ def create_app(
         hitters = [p for p in roster if not lineup.is_pitcher(p)]
         arms = [p for p in roster if lineup.is_pitcher(p)]
         fields = {}
+        lines = splits.get()
         for h in hitters:
             positions, from_games = lineup.fielding(h, elig)
             fields[h.mlb_id] = {
@@ -114,6 +118,8 @@ def create_app(
                 },
                 "from_games": from_games,
                 "games": elig.games_text(h.mlb_id),
+                "lines": {side: lines.line(h.mlb_id, side) for side in lineup.SIDES},
+                "grades": stats.grades(lineup.glove_positions(h, elig)),
             }
         return TEMPLATES.TemplateResponse(
             request,
@@ -129,6 +135,7 @@ def create_app(
                 "arms": arms,
                 "names": {a.mlb_id: a.name for a in arms},
                 "fields": fields,
+                "stats_source": lines.source,
                 "active": set(card.active),
                 "rotation": [pid for pid in card.rotation if pid is not None],
             },
