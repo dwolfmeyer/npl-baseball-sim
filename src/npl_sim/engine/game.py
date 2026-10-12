@@ -12,7 +12,7 @@ import random
 from dataclasses import dataclass, field
 
 from npl_sim.engine import bullpen as pen
-from npl_sim.engine import detail
+from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
@@ -29,6 +29,9 @@ class Hitter:
     vs_lhp: Rates
     vs_rhp: Rates
     speed: float = 0.0  # roughly sprint-speed z-score, -2..+2
+    # Fielding value (runs per 600 BIP vs the average there) at each position
+    # he's experienced at; empty = average anywhere. See fielding.py.
+    positions: dict[str, float] = field(default_factory=dict, hash=False, compare=False)
 
     def side_vs(self, throws: str) -> str:
         if self.bats == "S":
@@ -131,6 +134,10 @@ class _Side:
     subs_used: set[int] = field(default_factory=set)
     removed: set[str] = field(default_factory=set)  # players who left the game
     charged: dict[str, int] = field(default_factory=dict)  # runs charged per pitcher
+    defense: Defense = field(default_factory=Defense)  # the card's, for who plays where now
+
+    def set_defense(self) -> None:
+        self.defense = fielding.team_defense(self.card.defense, self.lineup)
 
 
 class GameSim:
@@ -144,6 +151,7 @@ class GameSim:
         for side in self.sides.values():
             side.pitcher = side.card.starter
             side.lineup = list(side.card.lineup)
+            side.set_defense()
             side.pitchers_used.append(side.card.starter.id)
         self.events: list[dict] = []
         self.inning = 1
@@ -253,7 +261,17 @@ class GameSim:
                 "name": card.name,
                 "abbr": card.short,
                 "lineup": [
-                    {"id": h.id, "name": h.name, "position": pos, "bats": h.bats}
+                    {
+                        "id": h.id,
+                        "name": h.name,
+                        "position": pos,
+                        "bats": h.bats,
+                        **(
+                            {"out_of_position": True}
+                            if fielding.out_of_position(h.positions, pos)
+                            else {}
+                        ),
+                    }
                     for h, pos in card.lineup
                 ],
                 "pitchers": [{"id": p.id, "name": p.name, "throws": p.throws} for p in pitchers],
@@ -347,6 +365,7 @@ class GameSim:
             side.lineup[target] = (sub.player, sub.position)
             side.subs_used.add(i)
             side.removed.add(out.id)
+            side.set_defense()
             self._log(
                 "defensive_sub",
                 team=side.card.name,
@@ -372,7 +391,7 @@ class GameSim:
         attempt = 0.045 * offense.card.steal_aggressiveness * (1 + 0.8 * runner.hitter.speed)
         if attempt <= 0 or self.rng.random() >= attempt:
             return
-        success = 0.78 + 0.06 * runner.hitter.speed - 0.08 * defense.card.defense.catcher_arm
+        success = 0.78 + 0.06 * runner.hitter.speed - 0.08 * defense.defense.catcher_arm
         if self.rng.random() < min(max(success, 0.4), 0.95):
             self.bases[0], self.bases[1] = None, runner
             kind = "stolen_base"
@@ -416,7 +435,7 @@ class GameSim:
             side,
             pitcher.throws,
             self.park,
-            defense.card.defense,
+            defense.defense,
             min(fatigue, 1.0),
             self.alignment,
         )
@@ -494,7 +513,7 @@ class GameSim:
 
     def _resolve(self, result: str, hitter: Hitter, pitcher: Pitcher, scored: list) -> str:
         rng, b = self.rng, self.bases
-        arm = self._fielding().card.defense.of_arm
+        arm = self._fielding().defense.of_arm
         batter = Runner(hitter, pitcher.id)
         if result == "K":
             self.outs += 1
@@ -551,7 +570,7 @@ class GameSim:
             return "3B"
 
         # A ball in play turned into an out, unless the fielder errs.
-        if rng.random() < self._fielding().card.defense.error_rate:
+        if rng.random() < self._fielding().defense.error_rate:
             batter.earned = False
             self._force(batter, scored)
             return "E"

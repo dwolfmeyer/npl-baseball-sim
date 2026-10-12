@@ -323,7 +323,14 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
             ("Team LOB", f"{lob[s]}."),
         ]
         dp = n["DP"]
+        start = events[0]
+        misplaced = [
+            f"{roster.short[p['id']]} ({p['position']})"
+            for p in start[s]["lineup"]
+            if p.get("out_of_position")
+        ]
         fielding = [
+            ("Out of position", ", ".join(misplaced) + "."),
             ("E", _tally(n["E"])),
             ("DP", f"{len(dp)} ({', '.join(x for _, x in dp)})." if dp else "."),
         ]

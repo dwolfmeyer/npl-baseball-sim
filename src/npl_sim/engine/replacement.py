@@ -31,7 +31,10 @@ def standin_hitter(pid: str, position: str) -> Hitter:
     def card(throws: str):
         return replace(average_split("R", throws), **scale)
 
-    return Hitter(pid, f"(AAA) {position}", "R", vs_lhp=card("L"), vs_rhp=card("R"))
+    glove = {} if position == "DH" else {position: 0.0}  # a stand-in plays his own spot
+    return Hitter(
+        pid, f"(AAA) {position}", "R", vs_lhp=card("L"), vs_rhp=card("R"), positions=glove
+    )
 
 
 # A (AAA) arm: about 2x the league's run rate.

@@ -68,13 +68,26 @@ def week_team(
         for p in roster
         if not lineup.is_pitcher(p) and p.mlb_id is not None
     }
+
+    # Each hitter knows the positions he's experienced at, so playing him
+    # anywhere else costs runs on the defensive spectrum (engine/fielding.py).
+    def glove(h):
+        return replace(h, positions={pos: 0.0 for pos in fields.get(h.id, ())})
+
+    def gloved(c):
+        return replace(
+            c,
+            lineup=[(glove(h), pos) for h, pos in c.lineup],
+            defensive_subs=tuple(replace(d, player=glove(d.player)) for d in c.defensive_subs),
+        )
+
     return WeekTeam(
-        card=base,
-        lineups=lineups,
+        card=gloved(base),
+        lineups={vs: [(glove(h), pos) for h, pos in o] for vs, o in lineups.items()},
         rotation=[c.starter for c in slot_cards.values()],
-        bench=bench,
+        bench=[glove(h) for h in bench],
         fields=fields,
-        slot_cards=slot_cards,
+        slot_cards={k: gloved(c) for k, c in slot_cards.items()},
     )
 
 
