@@ -1,0 +1,24 @@
+# NPL league alignment. Divisions are realigned every two offseasons:
+# add a new alignment block (or edit this one) rather than changing code.
+# `from_season` is the first season this alignment applies to.
+alignments:
+  - from_season: 2026
+    leagues:
+      - name: AL
+        dh: true
+        divisions:
+          - name: Oil Can
+            teams: [Milwaukee DockHounds, Hill Valley McFlys, Chicago Orphans, New York Valkyries]
+          - name: Splendid Splinter
+            teams: [Asbury Park Bosses, Los Angeles Bulldog, Midwest Ducksnorts, Chicago Kodiaks]
+          - name: Sultan of Swat
+            teams: [London Calling, Bad Guys, Lion King, Dallas Perwar]
+      - name: NL
+        dh: true
+        divisions:
+          - name: Big Train
+            teams: [Denver Bears, Cheesequake Cheddar, Quebec Quails, Durham Tobacconists]
+          - name: Say Hey Kid
+            teams: [Honolulu Hitmen, Frozen Ropes, Winterfell Starks, Old Sturbridge Villagers]
+          - name: Stan The Man
+            teams: [Nuremberg GmbH, Absolute Sickos, Central City Speedsters, Brooklyn TOOTBLANs]
