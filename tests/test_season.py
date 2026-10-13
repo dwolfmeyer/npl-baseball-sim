@@ -48,7 +48,7 @@ def test_week_games_are_days_of_the_week():
     assert len(games) == 14 and games[0][0] == 0 and games[-1][0] == 6
 
 
-def test_season_carries_rest_across_weeks():
+def test_season_carries_starts_across_weeks():
     weeks, schedule = _two_weeks()
     rosters = _rosters()
     elig = eligibility.load(2026)
@@ -61,7 +61,6 @@ def test_season_carries_rest_across_weeks():
     assert len(result.games) == 26
     standings = result.standings()
     assert sum(w for _, w, *_ in standings) == 26
-    assert min(result.starter_rest()) >= 5  # four days' rest, also across the weeks
     assert set(result.carry) == set(TEAMS)
 
 

@@ -69,12 +69,17 @@ def test_rotation_follows_mlb_starts_and_carries_unused_ones():
     assert "Home-SP3" not in starters  # no MLB start this week
     counts = Counter(starters)
     assert all(counts[p] <= 2 for p in counts)
-    # Four days off between starts.
-    for p in counts:
-        days = [g["day"] for g in result.games if g["moves"]["Home"].starter == p]
-        assert all(b - a > 4 for a, b in zip(days, days[1:], strict=False))
     carried = result.carry["Home"].starts
     assert all(n == 1 for n in carried.values())
+
+
+def test_starters_need_no_days_of_rest():
+    # Only two starters have starts this week: they alternate every day.
+    usage = week(starts={f"Home-SP{i}": 0 for i in range(3, 6)} | {"Home-SP1": 2, "Home-SP2": 2})
+    result = play_week(TEAMS, GAMES, usage, DEFAULT_ENV, seed=2)
+    starters = [g["moves"]["Home"].starter for g in result.games]
+    assert starters[:4] == ["Home-SP1", "Home-SP2", "Home-SP1", "Home-SP2"]
+    assert all(m.bullpen_game for g in result.games[4:] for m in [g["moves"]["Home"]])
 
 
 def test_bullpen_game_when_no_starter_can_go():
@@ -94,14 +99,32 @@ def relief_lines(result, team_prefix="Home-RP"):
     return outs, days
 
 
-def test_relievers_stay_inside_budget_and_rest():
+def test_relievers_stay_inside_budget():
     usage = week(relief_outs={"Home-RP1": 3})  # one MLB inning: 5 outs this week
     for seed in range(6):
         result = play_week(TEAMS, GAMES, usage, DEFAULT_ENV, seed=seed)
-        outs, days = relief_lines(result)
+        outs, _ = relief_lines(result)
         assert outs["Home-RP1"] <= 3 * RELIEF_SLACK + 3  # can finish the out he's on
-        for d in days.values():
-            assert not any({x, x + 1, x + 2} <= d for x in d)  # never three days running
+
+
+def test_relievers_need_no_days_of_rest_only_outs():
+    # One reliever with a big budget pitches whenever he's needed, day after day.
+    usage = week(relief_outs={f"Home-RP{i}": 0 for i in range(2, 8)} | {"Home-RP1": 60})
+    streaks = 0
+    for seed in range(6):
+        result = play_week(TEAMS, GAMES, usage, DEFAULT_ENV, seed=seed)
+        _, days = relief_lines(result)
+        streaks += any({x, x + 1, x + 2} <= days.get("Home-RP1", set()) for x in range(7))
+    assert streaks
+
+
+def test_a_hitter_with_any_pa_left_starts():
+    # 2 PA left (below the old 3-PA minimum): he still starts, and then he's done.
+    fields = FIELDS
+    lineup, moves = _cover_game(LINEUP, fields, FULL | {"SS1": 2})
+    assert lineup[1] == ("SS1", "SS") and not moves.replaced
+    lineup, moves = _cover_game(LINEUP, fields, FULL | {"SS1": 0})
+    assert lineup[1][0] != "SS1"
 
 
 def test_mlb_week_from_clean_tables():
@@ -160,7 +183,7 @@ def _cover_game(lineup, fields, pa, bench=()):
         fields={pid: set(f) for pid, f in fields.items()},
     )
     state = WeekState.open(MlbWeek(pa=pa, starts={"SP": 1}), Carry())
-    card, moves = game_card(team, state, 0, pitcher("SP"), "R")
+    card, moves = game_card(team, state, pitcher("SP"), "R")
     return [(h.id, pos) for h, pos in card.lineup], moves
 
 
