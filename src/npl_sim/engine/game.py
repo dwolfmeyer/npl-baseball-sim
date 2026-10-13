@@ -54,6 +54,9 @@ class Pitcher:
     vs_lhb: Rates
     vs_rhb: Rates
     pitch_limit: int = 95
+    # (Statcast pitch type, share, average mph) from the talent data; only the
+    # Gameday at-bat pop-up reads it (engine/pitchseq.py).
+    arsenal: tuple[tuple[str, float, float], ...] = ()
 
     def rates_vs(self, side: str) -> Rates:
         return self.vs_lhb if side == "L" else self.vs_rhb
@@ -282,7 +285,15 @@ class GameSim:
                     }
                     for h, pos in card.lineup
                 ],
-                "pitchers": [{"id": p.id, "name": p.name, "throws": p.throws} for p in pitchers],
+                "pitchers": [
+                    {
+                        "id": p.id,
+                        "name": p.name,
+                        "throws": p.throws,
+                        **({"arsenal": [list(a) for a in p.arsenal]} if p.arsenal else {}),
+                    }
+                    for p in pitchers
+                ],
                 "starter": card.starter.id,
                 "bench": [
                     {"id": h.id, "name": h.name, "bats": h.bats}

@@ -8,6 +8,7 @@ from npl_sim.engine.box import dp_positions
 from npl_sim.engine.detail import POSITION_TITLE
 from npl_sim.engine.leverage import index as leverage_index
 from npl_sim.engine.names import BASE_NAME, NEXT_BASE, Roster, ordinal
+from npl_sim.engine.pitchseq import Pitch, sequence
 from npl_sim.engine.winprob import win_expectancy
 
 BALL_TYPE = {"GB": "ground ball", "LD": "line drive", "FB": "fly ball", "PU": "pop up"}
@@ -25,6 +26,30 @@ HIT_VERB = {"1B": "singles", "2B": "doubles", "3B": "triples"}
 OUT_VERB = {"FO": "flies out", "LO": "lines out", "PO": "pops out"}
 
 
+RESULT_TITLE = {
+    "K": "Strikeout", "BB": "Walk", "HBP": "Hit By Pitch", "HR": "Home Run", "1B": "Single",
+    "2B": "Double", "3B": "Triple", "GO": "Groundout", "FO": "Flyout", "LO": "Lineout",
+    "PO": "Pop Out", "SF": "Sac Fly", "DP": "Grounded Into DP", "FC": "Forceout",
+    "E": "Field Error",
+}  # fmt: skip
+
+
+@dataclass
+class AtBat:
+    """What the Gameday at-bat pop-up shows beyond the play itself."""
+
+    title: str  # Strikeout, Single ...
+    batter: str
+    pitcher: str
+    bats: str  # the side he hit from
+    throws: str
+    position: str
+    outs: int  # before the PA
+    bases: tuple[bool, bool, bool]  # occupied before the PA
+    score: dict[str, int]  # by team abbreviation, before the PA
+    pitches: list[Pitch]
+
+
 @dataclass
 class Play:
     description: str
@@ -39,6 +64,7 @@ class Play:
     home_we: float | None = None  # home team's win expectancy after the play
     wpa: float | None = None  # win probability the batting team gained on the play
     li: float | None = None  # leverage index before a plate appearance
+    at_bat: AtBat | None = None  # plate appearances only
 
     @property
     def scoring(self) -> bool:
@@ -111,8 +137,12 @@ def game_log(events: list[dict]) -> GameLog:
         return win_expectancy(e["inning"], e["half"], lead, bases, outs, auto)
 
     home_we = we_start = win_expectancy(1, "top", 0, [None] * 3, 0, auto)
+    bats = {
+        p["id"]: p["bats"] for t in roster.teams.values() for p in t.lineup + t.bench if "bats" in p
+    }
+    arms = {p["id"]: p for t in roster.teams.values() for p in t.pitchers}
 
-    for e in events:
+    for i, e in enumerate(events):
         if e["type"] in ("game_start", "final"):
             continue
         offense = "away" if e["half"] == "top" else "home"
@@ -129,6 +159,7 @@ def game_log(events: list[dict]) -> GameLog:
             lead = score["home"] - score["away"]
             li = leverage_index(e["inning"], e["half"], lead, e["bases_before"], e["outs_before"])
             runs = len(e["scored"])
+            before = {abbr["away"]: score["away"], abbr["home"]: score["home"]}
             score[offense] += runs
             half.runs += runs
             half.hits += e["result"] in ("1B", "2B", "3B", "HR")
@@ -142,6 +173,7 @@ def game_log(events: list[dict]) -> GameLog:
                 outs=e["outs_before"] + e["outs"],
                 runs=runs,
                 li=li,
+                at_bat=_at_bat(e, i, before, bats, arms, full),
             )
         elif e["type"] == "stolen_base":
             play = Play(f"{full[e['runner']]} steals 2nd base.", e["type"], outs=e["outs_after"])
@@ -201,6 +233,36 @@ def game_log(events: list[dict]) -> GameLog:
             half.plays.append(play)
 
     return GameLog(roster.teams["away"].name, roster.teams["home"].name, halves, we_start)
+
+
+def _at_bat(e: dict, i: int, score: dict, bats: dict, arms: dict, full: dict) -> AtBat:
+    arm = arms.get(e["pitcher"], {})
+    throws = arm.get("throws", "R")
+    side = bats.get(e["batter"], "R")
+    if side == "S":
+        side = "L" if throws == "R" else "R"
+    pitches = sequence(
+        f"{i}:{e['batter']}:{e['pitcher']}:{e['inning']}{e['half']}",
+        e["result"],
+        e["pitches"],
+        tuple(e["count"]),
+        arm.get("arsenal", ()),
+        side,
+        e.get("k_type"),
+        len(e["scored"]),
+    )
+    return AtBat(
+        title=RESULT_TITLE.get(e["result"], e["result"]),
+        batter=full[e["batter"]],
+        pitcher=full[e["pitcher"]],
+        bats=side,
+        throws=throws,
+        position=e.get("position", ""),
+        outs=e["outs_before"],
+        bases=tuple(b is not None for b in e["bases_before"]),
+        score=score,
+        pitches=pitches,
+    )
 
 
 def _describe_pa(e: dict, full: dict[str, str], fielder) -> str:

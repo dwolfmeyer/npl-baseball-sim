@@ -29,6 +29,7 @@ PRIOR_SEASONS = 2
 # fold the pitch data the same way so counts line up.
 STATCAST_TO_FG = {"ST": "SL", "SV": "CU", "FA": "FF", "CS": "CU"}
 SPRINT_AVERAGE, SPRINT_SD = 27.0, 1.5  # ft/s
+ARSENAL_MIN = 150  # pitches this season before his mix replaces last season's
 
 
 @dataclass
@@ -43,6 +44,8 @@ class WeekTalent:
     range: dict[str, tuple[str, float]] = field(default_factory=dict)
     framing: dict[str, float] = field(default_factory=dict)
     arm: dict[str, float] = field(default_factory=dict)
+    # Pitch mix by pitcher id: ((Statcast type, share, mph), ...).
+    arsenal: dict[str, tuple] = field(default_factory=dict)
 
     def hitter(self, h: Hitter) -> Hitter:
         if h.id.startswith("AAA-"):
@@ -62,7 +65,8 @@ class WeekTalent:
     def pitcher(self, p: Pitcher) -> Pitcher:
         if p.id.startswith("AAA-"):
             return p
-        return tb.pitcher_card(p, self.players.get(f"pitcher:{p.id}"), self.league)
+        card = tb.pitcher_card(p, self.players.get(f"pitcher:{p.id}"), self.league)
+        return replace(card, arsenal=self.arsenal.get(p.id, card.arsenal))
 
     def card(self, c: TeamCard) -> TeamCard:
         return replace(
@@ -170,7 +174,38 @@ def build_week_talent(
     stuff = stuff_by_pitcher(stuff_board, season_pitches) if stuff_board is not None else {}
     players = tb.blend(seasons, week, stuff=stuff, players=hands)
     speed = sprint_speed(sprint_board) if sprint_board is not None else {}
-    return WeekTalent(league=current, players=players, speed=speed)
+    last_pitches = next((p for back, p in prior if back == 1), None)
+    return WeekTalent(
+        league=current,
+        players=players,
+        speed=speed,
+        arsenal=arsenals(season_pitches, last_pitches),
+    )
+
+
+def arsenals(
+    season: pd.DataFrame, last: pd.DataFrame | None = None, min_pitches: int = ARSENAL_MIN
+) -> dict[str, tuple]:
+    """Each pitcher's pitch mix this season (last season's when he has thrown
+    fewer than `min_pitches` this year): share and average speed by pitch type,
+    dropping pitches under 2% of his total."""
+    out: dict[str, tuple] = {}
+    for frame in (last, season):  # this season overwrites last
+        if frame is None or frame.empty or "pitch_type" not in frame:
+            continue
+        typed = frame[frame["pitch_type"].notna() & frame["release_speed"].notna()]
+        for pid, mine in typed.groupby("pitcher"):
+            if frame is season and len(mine) < min_pitches and str(pid) in out:
+                continue
+            stats = mine.groupby("pitch_type")["release_speed"].agg(["size", "mean"])
+            share = stats["size"] / stats["size"].sum()
+            keep = stats[share >= 0.02].sort_values("size", ascending=False)
+            total = keep["size"].sum()
+            out[str(pid)] = tuple(
+                (str(code), round(float(r["size"] / total), 3), round(float(r["mean"]), 1))
+                for code, r in keep.iterrows()
+            )
+    return out
 
 
 def stuff_by_pitcher(board: pd.DataFrame, pitches: pd.DataFrame) -> dict[str, float]:

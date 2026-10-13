@@ -101,7 +101,14 @@ all plays or scoring plays. A win probability chart under the line score
 shows the game's flow and marks its three biggest plays, and each play in the
 log carries its WPA and leverage index (`engine/winprob.py`: win expectancy
 by inning, half, score, runners and outs, chained from how many runs the
-engine scores from each base-out state, as in Tango's tables). Each PA combines batter and pitcher with
+engine scores from each base-out state, as in Tango's tables). Clicking a
+plate appearance opens an mlb.com-style at-bat pop-up: score, result, the
+batting team's win probability and WPA, pitcher and batter, bases, outs and
+count, and each pitch with its call, speed, type and spot in the strike zone.
+The engine doesn't play pitch by pitch, so `engine/pitchseq.py` fills in a
+sequence that matches the logged pitch count and final count, on its own
+random stream (results never change), using the pitcher's real pitch mix and
+speeds from Statcast when the talent data has them. Each PA combines batter and pitcher with
 multinomial log5 against the league rate for that handedness matchup, then
 applies fatigue, catcher framing, park (the only place park factors enter)
 and defense/alignment once each. Teams play straight up unless the owner
