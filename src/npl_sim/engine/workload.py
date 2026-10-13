@@ -7,9 +7,21 @@ days and multi-day reliever fatigue. The rules here:
 Hitters
 - Budget = MLB plate appearances that week x PA_SLACK, rounded.
 - A hitter with no MLB PA that week doesn't play. Before each game, a hitter
-  starts only with at least MIN_PA_TO_START left; otherwise the best bench
-  player who fits his position takes the slot, and when none fits a (AAA)
-  stand-in at Scoresheet's penalty levels does (replacement.py).
+  starts only with at least MIN_PA_TO_START left. His spot is covered the way
+  a manager uses his bench (Dave, 2026-10-13), hardest positions first:
+  1. a bench player with PA left who is eligible there;
+  2. the DH, if he is eligible there (the DH spot then opens);
+  3. the same two through a move a manager would make (FLEX): only eligible
+     catchers catch; a first baseman to a corner outfield spot; a third
+     baseman to first or a corner; a shortstop or second baseman anywhere on
+     the infield; an outfielder anywhere in the outfield;
+  4. another fielder moving over (eligible or FLEX) while a bench player or
+     the DH covers his spot;
+  5. only then a (AAA) stand-in at Scoresheet's penalty levels
+     (replacement.py).
+  An open DH spot goes to the bench player with the most PA left, else a
+  stand-in. The sub bats in the spot of the player he replaced; a player who
+  moves keeps his own. Defensive-spectrum costs still apply (fielding.py).
 
 Starters
 - Sim starts = MLB starts that week + starts carried from last week (at most
@@ -44,6 +56,18 @@ START_REST = 4  # days off between starts
 REST_PITCHES_1 = 25
 REST_PITCHES_2 = 40
 BULLPEN_GAME_PITCHES = 50
+# Positions a player can be moved to beyond his eligible ones (see above).
+FLEX = {
+    "1B": {"LF", "RF"},
+    "3B": {"1B", "LF", "RF"},
+    "2B": {"1B", "3B", "SS"},
+    "SS": {"1B", "2B", "3B"},
+    "LF": {"CF", "RF"},
+    "CF": {"LF", "RF"},
+    "RF": {"LF", "CF"},
+}
+# Hardest spots are covered first, so scarce gloves go where they're needed.
+FILL_ORDER = ("C", "SS", "CF", "2B", "3B", "RF", "LF", "1B", "DH")
 
 
 @dataclass(frozen=True)
@@ -193,6 +217,7 @@ class Moves:
     starter: str
     bullpen_game: bool = False
     replaced: list[dict] = field(default_factory=list)  # {out, into, position, standin}
+    shifted: list[dict] = field(default_factory=list)  # {player, from, to}: moved to cover
     unavailable: list[str] = field(default_factory=list)  # relievers resting or used up
     standin_pitcher: bool = False  # the whole pen was out: a (AAA) arm relieves
 
@@ -242,19 +267,7 @@ def game_card(
         moves.standin_pitcher = True
 
     lineup = list(team.lineups.get(opposing_throws) or card.lineup)
-    in_use = {h.id for h, _ in lineup}
-    for slot, (hitter, pos) in enumerate(lineup):
-        if state.can_hit(hitter.id):
-            continue
-        sub = _bench_fit(team, state, pos, in_use)
-        standin = sub is None
-        if standin:
-            sub = standin_hitter(f"AAA-{card.short}-{pos}-{slot + 1}", pos)
-        lineup[slot] = (sub, pos)
-        in_use.add(sub.id)
-        moves.replaced.append(
-            {"out": hitter.id, "into": sub.id, "position": pos, "standin": standin}
-        )
+    lineup, in_use = _cover(team, state, lineup, card.short, moves)
 
     outs_limit = {
         p.id: state.outs_left.get(p.id, 0)
@@ -278,14 +291,105 @@ def game_card(
     return game, moves
 
 
-def _bench_fit(team: WeekTeam, state: WeekState, pos: str, in_use: set[str]) -> Hitter | None:
+def can_cover(fields: set[str], pos: str, flex: bool = True) -> bool:
+    """Whether a player eligible at `fields` can play `pos` (with FLEX moves)."""
+    if pos == "DH" or pos in fields:
+        return True
+    return flex and any(pos in FLEX.get(f, ()) for f in fields)
+
+
+def _cover(team: WeekTeam, state: WeekState, lineup: list, short: str, moves: Moves):
+    """The lineup with every hitter out of PA covered (see the module docstring)."""
+    in_use = {h.id for h, _ in lineup}
+    out = {i: h for i, (h, _) in enumerate(lineup) if not state.can_hit(h.id)}
+    todo = sorted(out, key=lambda i: FILL_ORDER.index(lineup[i][1]))
+    filled: dict[int, Hitter] = {}  # slot -> who bats there now
+
+    def fields(h: Hitter) -> set[str]:
+        return team.fields.get(h.id, set())
+
+    def bench(pos: str, flex: bool) -> Hitter | None:
+        return _bench_fit(team, state, pos, in_use, flex)
+
+    def dh_for(pos: str, flex: bool) -> int | None:
+        return next(
+            (
+                j
+                for j, (h, p) in enumerate(lineup)
+                if p == "DH" and j not in out and can_cover(fields(h), pos, flex)
+            ),
+            None,
+        )
+
+    def sub_in(slot: int, h: Hitter, pos: str, standin: bool = False) -> None:
+        lineup[slot] = (h, pos)
+        in_use.add(h.id)
+        filled[slot] = h
+        moves.replaced.append(
+            {"out": out[slot].id, "into": h.id, "position": pos, "standin": standin}
+        )
+
+    def shift(j: int, to: str) -> None:
+        h, frm = lineup[j]
+        lineup[j] = (h, to)
+        moves.shifted.append({"player": h.id, "from": frm, "to": to})
+
+    while todo:
+        slot = todo.pop(0)
+        pos = lineup[slot][1]
+        if pos == "DH":
+            sub = bench("DH", False)
+            sub_in(slot, sub or standin_hitter(f"AAA-{short}-DH-{slot + 1}", "DH"), "DH", not sub)
+            continue
+        done = False
+        for flex in (False, True):
+            sub = bench(pos, flex)
+            if sub is not None:
+                sub_in(slot, sub, pos)
+                done = True
+                break
+            j = dh_for(pos, flex)
+            if j is not None:  # the DH takes the field; the open spot becomes the DH
+                shift(j, pos)
+                lineup[slot] = (out[slot], "DH")
+                todo.insert(0, slot)
+                done = True
+                break
+        if done:
+            continue
+        # Another fielder slides over and the bench (or the DH) covers his spot.
+        for j, (h, q) in enumerate(lineup):
+            if j == slot or j in out or q == "DH" or not can_cover(fields(h), pos):
+                continue
+            sub = bench(q, True)
+            if sub is not None:
+                shift(j, pos)
+                sub_in(slot, sub, q)
+                done = True
+                break
+            d = dh_for(q, True)
+            if d is not None:
+                shift(j, pos)
+                shift(d, q)
+                lineup[slot] = (out[slot], "DH")
+                todo.insert(0, slot)
+                done = True
+                break
+        if not done:
+            sub_in(slot, standin_hitter(f"AAA-{short}-{pos}-{slot + 1}", pos), pos, True)
+    return lineup, in_use
+
+
+def _bench_fit(
+    team: WeekTeam, state: WeekState, pos: str, in_use: set[str], flex: bool = False
+) -> Hitter | None:
     """The bench player with the most PA left who can play `pos`."""
     fits = [
         h
         for h in team.bench
         if h.id not in in_use
         and state.can_hit(h.id)
-        and (pos == "DH" or pos in team.fields.get(h.id, set()))
+        and can_cover(team.fields.get(h.id, set()), pos, flex)
     ]
     return max(fits, key=lambda h: state.pa_left.get(h.id, 0), default=None)
 
