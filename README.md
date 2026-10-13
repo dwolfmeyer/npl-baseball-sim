@@ -143,7 +143,12 @@ every runner gets exactly two bases); sacrifice flies; sacrifice bunts
 runner on first or second and third open, from the 7th inning, tied or down
 one; outcomes include bunt singles, force outs, pop-ups and foul-bunt
 strikeouts); wild pitches, passed balls (runs unearned) and balks at recent
-MLB rates.
+MLB rates. Steals, wild pitches and passed balls happen on a pitch of the PA
+in progress: that PA throws at least one more pitch, the play-by-play reads
+"With X batting, ..." and the at-bat pop-up marks the pitch. When a caught
+stealing makes the third out or a wild pitch scores the winning run, the PA
+ends early and its pitches still count toward the pitcher's total, his hook
+and the box score.
 
 Stealing and baserunning (`engine/game.py` `_maybe_steal`, `_send`; owner
 settings in `engine/manager.py` `Baserunning` and `BUNT_STRATEGIES`, on the

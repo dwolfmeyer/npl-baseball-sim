@@ -232,8 +232,29 @@ class GameSim:
         self._homer = False  # every run counts on a walk-off home run
         self._ground_rule = False  # the last double bounced out of play
         self._outs_on_bases: list[dict] = []  # runners thrown out on the last PA
+        self._pa_pitches = 0  # pitches of the coming PA thrown on steals and wild pitches
 
     # -- helpers -------------------------------------------------------------
+    def _during_pa(self, pitched: bool = True) -> dict:
+        """Where a steal, wild pitch, passed ball or balk falls in the coming
+        PA: the batter at the plate and the pitch it came on (a balk comes
+        before the next pitch, so it adds none)."""
+        if pitched:
+            self._pa_pitches += 1 + (self.detail_rng.random() < 0.4)
+        batter = self._batting().lineup[self._batting().slot][0]
+        return {"batter": batter.id, "pitch": self._pa_pitches}
+
+    def _cut_short(self) -> None:
+        """The PA ended before it finished (third out on the bases, or the
+        winning run scoring): its pitches count for the pitcher, carried on
+        the event that ended it."""
+        if not self._pa_pitches:
+            return
+        n = self._pa_pitches
+        self._fielding().pitches += n
+        strikes = sum(self.detail_rng.random() < 0.55 for _ in range(n - 1))
+        self.events[-1] |= {"pitches": n, "strikes": strikes}
+
     def _log(self, kind: str, **data) -> None:
         self.events.append({"type": kind, "inning": self.inning, "half": self.half, **data})
 
@@ -458,13 +479,20 @@ class GameSim:
         while self.outs < 3:
             if self._walkoff():
                 break
+            # Steals, wild pitches, passed balls and balks happen during the
+            # coming PA, on its pitches (_pa_pitches counts the ones thrown so
+            # far). A caught stealing for the third out or a walk-off wild
+            # pitch ends it early; its pitches still count.
+            self._pa_pitches = 0
+            self._maybe_pinch_hit()
             self._maybe_steal()
             if self.outs >= 3:
+                self._cut_short()
                 break
             self._maybe_wild_pitch()
             if self._walkoff():
+                self._cut_short()
                 break
-            self._maybe_pinch_hit()
             self._plate_appearance()
             if self.outs < 3 and not self._walkoff():
                 self._maybe_change_pitcher(mid_inning=True)
@@ -641,6 +669,7 @@ class GameSim:
             kind,
             runner=runner.hitter.id,
             pitcher=defense.pitcher.id,
+            **self._during_pa(),
             base=base,
             outs_after=self.outs,
             bases_after=self._bases(),
@@ -685,6 +714,7 @@ class GameSim:
         self._log(
             kind,
             pitcher=p.id,
+            **self._during_pa(pitched=kind != "balk"),
             scored=scored,
             runners=moves,
             bases_before=before,
@@ -774,6 +804,9 @@ class GameSim:
         kind = result.split(":")[0] if ":" in result else result
         mean = PITCHES["BUNT" if bunt else "BIP" if ":" in result else kind]
         pitches = max(1, round(mean + self.rng.uniform(-1.5, 1.5)))
+        pitches = max(
+            pitches, self._pa_pitches + 1
+        )  # the PA's steals and wild pitches came on its pitches
         defense.pitches += pitches
         defense.batters_faced += 1
 

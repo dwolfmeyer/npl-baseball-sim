@@ -197,6 +197,12 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
             continue
         offense = "away" if e["half"] == "top" else "home"
         defense = other[offense]
+        if e["type"] != "pa" and e.get("pitches"):
+            # A PA cut short by the third out on the bases or a walk-off wild
+            # pitch: its pitches still count, though the batter gets no PA.
+            p = pit(defense, e["pitcher"])
+            p.pitches += e["pitches"]
+            p.strikes += e["strikes"]
         if e["type"] == "pa":
             res = e["result"]
             b = batting[offense][e["batter"]]

@@ -299,6 +299,7 @@ def _at_bat(box: BoxScore, half, p, n: int) -> str:
     state = _diamond(ab.bases, ab.outs).replace("{count}", count)
     rows = "".join(
         f'<li><span class="n k-{q.kind}">{q.number}</span><div>{escape(q.call)}'
+        f"{f' <em>{escape(q.note)}</em>' if q.note else ''}"
         f"<small>{q.mph:.1f} mph {escape(q.name)}</small></div>"
         f"<span>{q.balls} - {q.strikes}</span></li>"
         for q in ab.pitches

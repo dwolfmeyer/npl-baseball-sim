@@ -16,9 +16,11 @@ kinds of records (the "record" key):
   leverage, the bullpen situation tier, the reliever's role and who else was
   available), pinch hitters (leverage, expected run gain), defensive subs,
   steals and caught stealing, the extra-inning runner, and wild pitches,
-  passed balls and balks. Sacrifice-bunt PAs carry `"bunt": true` in
-  their outcome and the bunt's odds in place of the swing-away odds; runners
-  thrown out taking an extra base are in the outcome's `thrown_out`.
+  passed balls and balks (each with the batter at the plate and the pitch of
+  his PA it came on, and `pitches` when it ended the PA early).
+  Sacrifice-bunt PAs carry `"bunt": true` in their outcome and the bunt's
+  odds in place of the swing-away odds; runners thrown out taking an extra
+  base are in the outcome's `thrown_out`.
 - player: each batter and pitcher who took part, with the card rates the
   engine used (vs LHP/RHP or vs LHB/RHB), the talent blend's indexes and
   layers (baseline, process, results), and real stat lines by season and
@@ -73,7 +75,7 @@ def _decision(e: dict, number: int, score: dict, extra: dict, names: dict, setup
         "score_before": dict(score),
     }
     rec |= {k: v for k, v in e.items() if k not in ("type", "inning", "half")}
-    for key in ("out", "into", "runner", "pitcher"):
+    for key in ("out", "into", "runner", "pitcher", "batter"):
         if key in e:
             rec[f"{key}_name"] = names.get(e[key], (e[key], None))[0]
     if e["type"] == "pitching_change":

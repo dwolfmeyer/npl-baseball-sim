@@ -54,6 +54,7 @@ class Pitch:
     mph: float
     x: float  # feet from the middle of the plate, catcher's view
     z: float  # feet above the ground
+    note: str = ""  # a play on this pitch: Wild pitch, Passed ball, Stolen base ...
 
     @property
     def name(self) -> str:
