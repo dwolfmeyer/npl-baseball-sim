@@ -176,10 +176,14 @@ def game_log(events: list[dict]) -> GameLog:
                 at_bat=_at_bat(e, i, before, bats, arms, full),
             )
         elif e["type"] == "stolen_base":
-            play = Play(f"{full[e['runner']]} steals 2nd base.", e["type"], outs=e["outs_after"])
+            base = BASE_NAME[e.get("base", "2B")]
+            play = Play(f"{full[e['runner']]} steals {base} base.", e["type"], outs=e["outs_after"])
         elif e["type"] == "caught_stealing":
+            base = e.get("base", "2B")
+            cover = fielder("3B" if base == "3B" else "SS")
             desc = (
-                f"{full[e['runner']]} caught stealing 2nd base, {fielder('C')} to {fielder('SS')}."
+                f"{full[e['runner']]} caught stealing {BASE_NAME[base]} base, "
+                f"{fielder('C')} to {cover}."
             )
             play = Play(desc, e["type"], outs=e["outs_after"])
         elif e["type"] == "pitching_change":
@@ -364,6 +368,9 @@ def _runner_notes(e: dict, full: dict[str, str]) -> list[str]:
         name = full[m["runner"]]
         if m["end"] == "score":
             notes.append(f"{name} scores.")
+        elif m["end"] == "out" and m.get("out_at"):
+            at = "home" if m["out_at"] == "home" else BASE_NAME[m["out_at"]]
+            notes.append(f"{name} thrown out at {at}.")
         elif m["end"] == "out":
             notes.append(f"{name} out at {NEXT_BASE[m['start']]}.")
         elif m["end"] != m["start"]:

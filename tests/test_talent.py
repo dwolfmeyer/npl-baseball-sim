@@ -175,8 +175,18 @@ def test_load_week_talent_from_clean_tables(tmp_path, history):
         asof / "sprint_speed.parquet"
     )
     pd.DataFrame({"mlbam_id": [1001], "sp_stuff": [125.0]}).to_parquet(asof / "fg_pitching.parquet")
+    # Box-score lines: player 1 steals a lot; the league has enough tries to set the rates.
+    cols = ["mlbam_id", "h", "doubles", "triples", "hr", "bb", "hbp", "sb", "cs"]
+    rows = [(1, 40, 0, 0, 0, 10, 0, 20, 2)] + [
+        (100 + i, 40, 0, 0, 0, 10, 0, 4, 1) for i in range(80)
+    ]
+    pd.DataFrame(rows, columns=cols).to_parquet(week / "batting.parquet")
     wt = load_week_talent(tmp_path, 2026, 2)
     assert wt.speed["1"] == 2.0 and wt.speed["2"] == -2.0
+    assert wt.league.env().steal_attempt == pytest.approx(422 / 4050)
+    fast = wt.hitter(hitter("1"))
+    assert fast.steal_attempt > 0.25 and fast.steal_success > 0.85
+    assert wt.hitter(hitter("2")).steal_attempt is None  # no box-score line: speed decides
     assert wt.players["pitcher:1001"].layers["process"]["K"] > 1.0  # Stuff+ 125
     h = wt.hitter(hitter("3", bats="R"))
     assert h.vs_rhp.hr > DEFAULT_ENV.split("R", "R").hr

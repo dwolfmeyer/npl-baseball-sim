@@ -145,6 +145,27 @@ one; outcomes include bunt singles, force outs, pop-ups and foul-bunt
 strikeouts); wild pitches, passed balls (runs unearned) and balks at recent
 MLB rates.
 
+Stealing and baserunning (`engine/game.py` `_maybe_steal`, `_send`; owner
+settings in `engine/manager.py` `Baserunning` and `BUNT_STRATEGIES`, on the
+lineup card under "Bunting, stealing and baserunning"). Runners steal second,
+and third with fewer than two out, as often as they do in MLB: each runner's
+attempts per time on first and success rate come from his statsapi box-score
+SB and CS over this season and the two before (`talent/running.py`),
+regressed toward the league's rate for his sprint speed. The league's own
+rates come from this season's box scores (default 0.105 attempts per time on
+first, 77.5% success, about 0.96 tries a team game). Success also moves with
+the catcher's arm (pop time to second and FanGraphs rSB caught-stealing runs,
+this season and the three before), the pitcher's hand, and the owner's
+aggressiveness (Never, Conservative, Normal, Aggressive, Very aggressive; a
+more aggressive manager runs more and in worse spots, so more runners are
+caught). Nobody runs with a lead of five or more, or trailing by three or more
+from the 7th, and owners can give any hitter a red light. Taking the extra base
+on singles, doubles and fly balls is two rolls: whether the runner is sent
+(the MLB rate for the play, moved by his speed, the outfield arms and the
+owner's extra-base setting) and whether he's safe or thrown out (weighted by
+his sprint speed against the outfield arms). Runners thrown out show in the
+play-by-play, the audit log (`thrown_out`) and the season totals (OOB).
+
 Weekly playing time (`engine/workload.py`, `play_week`): each player's sim
 week follows his real one. Hitters get 1.25x their MLB PA and start while
 they have 3 or more left. A hitter who can't is covered the way a manager uses

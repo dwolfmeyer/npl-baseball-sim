@@ -74,6 +74,45 @@ class Bunting:
 
 NO_BUNTING = Bunting(enabled=False)
 
+# Bunting strategies on the lineup card (Dave, 2026-10-13); the owner can
+# still change any setting.
+BUNT_STRATEGIES = {
+    "never": ("Never bunt", NO_BUNTING),
+    "late_close": ("Sacrifice late and close (default)", Bunting()),
+    "small_ball": (
+        "Small ball: from the 6th, within two runs, any below-average bat",
+        Bunting(from_inning=6, max_deficit=2, max_lead=1, min_shortfall=0.01, rate=0.8),
+    ),
+}
+
+
+@dataclass(frozen=True)
+class Baserunning:
+    """How the owner runs the bases (Dave, 2026-10-13).
+
+    - `steal`: how often runners go. 1 = each runner at his own real MLB
+      attempt rate; 0 = never; 0.5 conservative; 1.5 aggressive; 2 very
+      aggressive. An aggressive manager also runs in worse spots, so his
+      runners are caught a little more often.
+    - `extra_base`: the same scale for sending runners for the extra base on
+      hits and tagging up. The runner's sprint speed and the outfield arms
+      decide whether he makes it.
+    - `no_steal`: player ids who never steal (a red light).
+    """
+
+    steal: float = 1.0
+    extra_base: float = 1.0
+    no_steal: tuple[str, ...] = field(default=())
+
+
+AGGRESSION = {
+    0.0: "Never",
+    0.5: "Conservative",
+    1.0: "Normal",
+    1.5: "Aggressive",
+    2.0: "Very aggressive",
+}
+
 
 @dataclass(frozen=True)
 class ManagerStyle:

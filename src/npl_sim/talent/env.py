@@ -33,13 +33,19 @@ class League:
     pa: dict[tuple[str, str], dict[str, float]]
     bip: dict[tuple[str, str], dict[str, float]]
     hit: dict[str, dict[str, float]]
+    # (steal attempts per time on first, success rate) from this season's box
+    # scores (talent/running.py); None = the engine's defaults.
+    steal: tuple[float, float] | None = None
 
     def env(self) -> LeagueEnv:
         rates = {
             key: Rates(k=r["K"], bb=r["BB"], hbp=r["HBP"], hr=r["HR"], bip=dict(self.bip[key]))
             for key, r in self.pa.items()
         }
-        return LeagueEnv(rates=rates, hit_table={t: dict(h) for t, h in self.hit.items()})
+        steal = (
+            {"steal_attempt": self.steal[0], "steal_success": self.steal[1]} if self.steal else {}
+        )
+        return LeagueEnv(rates=rates, hit_table={t: dict(h) for t, h in self.hit.items()}, **steal)
 
 
 def default_league() -> League:

@@ -15,6 +15,7 @@ from npl_sim.engine.game import Hitter, Pitcher, TeamCard
 from npl_sim.engine.workload import WeekTeam
 from npl_sim.talent import blend as tb
 from npl_sim.talent import fielding as tf
+from npl_sim.talent import running as tr
 from npl_sim.talent.env import League, default_league, league
 from npl_sim.talent.events import pitch_flags, plate_appearances
 from npl_sim.talent.lines import stat_lines
@@ -46,6 +47,8 @@ class WeekTalent:
     range: dict[str, dict[str, float]] = field(default_factory=dict)
     framing: dict[str, float] = field(default_factory=dict)
     arm: dict[str, float] = field(default_factory=dict)
+    # Base stealing (talent/running.py): (attempts per time on first, success).
+    steals: dict[str, tuple[float, float]] = field(default_factory=dict)
     # Pitch mix by pitcher id: ((Statcast type, share, mph), ...).
     arsenal: dict[str, tuple] = field(default_factory=dict)
     # Real stat lines behind the blend, for the audit log (talent/lines.py).
@@ -64,6 +67,8 @@ class WeekTalent:
             speed=self.speed.get(h.id, h.speed),
             positions=gloves,
             arm=self.arm.get(h.id, h.arm),
+            steal_attempt=self.steals[h.id][0] if h.id in self.steals else h.steal_attempt,
+            steal_success=self.steals[h.id][1] if h.id in self.steals else h.steal_success,
         )
 
     def pitcher(self, p: Pitcher) -> Pitcher:
@@ -138,7 +143,35 @@ def load_week_talent(clean_root: Path, season: int, week: int, hands=None) -> We
     )
     season_pitches = pd.concat([to_date, week_pitches], ignore_index=True)
     add_fielding(talent, boards, season_pitches, prior_boards, dict(prior))
+    batting = [(0, read_batting([p for p in _weeks(this) if _number(p) <= week]))]
+    for back in (1, 2):
+        batting.append((back, read_batting(_weeks(root / str(season - back)))))
+    add_running(talent, batting, boards, prior_boards)
     return talent
+
+
+def read_batting(folders: list[Path]) -> pd.DataFrame:
+    """The statsapi box-score batting lines (one row per player per game) in `folders`."""
+    paths = [p / "batting.parquet" for p in folders if (p / "batting.parquet").exists()]
+    frames = [f for f in (pd.read_parquet(p) for p in paths) if not f.empty]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def add_running(
+    talent, batting: list[tuple[int, pd.DataFrame]], boards: dict, prior_boards: dict
+) -> None:
+    """Steal rates for the league and each runner from [(seasons back, box-score
+    batting lines)], and catchers' arms from pop time and caught-stealing runs."""
+    this = next((b for back, b in batting if back == 0), None)
+    rates = tr.league_rates(this) if this is not None else None
+    if rates is not None:
+        talent.league = replace(talent.league, steal=rates)
+    env = talent.league.env()
+    talent.steals = tr.steal_ratings(batting, talent.speed, (env.steal_attempt, env.steal_success))
+    seasons = [(0, boards.get("poptime"), boards.get("fg_fielding"))] + [
+        (back, b.get("poptime"), b.get("fg_fielding")) for back, b in sorted(prior_boards.items())
+    ]
+    talent.arm.update(tr.catcher_arms(seasons))
 
 
 def add_fielding(

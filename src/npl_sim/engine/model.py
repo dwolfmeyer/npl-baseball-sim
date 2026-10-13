@@ -55,6 +55,12 @@ class LeagueEnv:
     hit_table: dict[str, dict[str, float]]
     # Extra-inning automatic runner and other rules are on by default.
     auto_runner: bool = True
+    # Base stealing in today's game: attempts per time a runner reaches first
+    # (singles, walks, hit by pitch) and the share that succeed. These are
+    # 2024-25 MLB levels; talent/running.py measures them from the season's
+    # box scores when they're at hand.
+    steal_attempt: float = 0.105
+    steal_success: float = 0.775
 
     def split(self, bats: str, throws: str) -> Rates:
         return self.rates[(bats, throws)]
