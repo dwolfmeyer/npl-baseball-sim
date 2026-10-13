@@ -193,7 +193,8 @@ starter free the pen opens a bullpen game). Unused starts and the rotation turn 
 reads a real week from the pipeline's clean tables.
 
 `npl-sim sim-week` (`npl_sim/simweek.py`) plays a week between the test teams'
-saved lineup cards (default cards when none are saved): a round robin, each
+saved lineup cards (default cards when none are saved): two three-game series per team (Tue-Thu and
+Fri-Sun, Monday off, a different opponent each series), each
 team's orders vs LHP and RHP, the rotation with each slot's plan, the pen and
 bench. Without `--week` each player gets a typical week at his season pace
 from the eligibility data (full time when he has none). `--out` writes a week

@@ -479,9 +479,9 @@ def test_sim_a_week(client):
     resp = client.post("/weeks", data={"seed": "11"})
     assert resp.status_code == 200 and "NPL test week" in resp.text and "Standings" in resp.text
     assert all(team in resp.text for team in (DUCKS, MCFLYS, ROPES))
-    # Three teams: one sits each day, so seven games, each with its own game page.
+    # Three teams: one sits each series, so six games, each with its own game page.
     games = resp.text.count(">Box score</a>")
-    assert games == 7
+    assert games == 6
     link = resp.text.split('href="/games/')[1].split('"')[0]
     assert "Play-by-play" in client.get(f"/games/{link}").text
     home = client.get("/").text

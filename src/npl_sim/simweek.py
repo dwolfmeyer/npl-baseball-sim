@@ -98,22 +98,32 @@ def _hitter(p: NplPlayer, elig: Eligibility | None):
     return replace(hitter(str(p.mlb_id), bats=bats), name=p.name)
 
 
-def round_robin(teams: list[str], days: int = DAYS) -> list[tuple[int, str, str]]:
-    """A round robin for a test week: each day the teams pair up (one sits
-    when the count is odd), rotating partners and home field."""
+# A test week is two three-game series, Tuesday to Thursday and Friday to Sunday,
+# with Monday off (MLB's usual shape). (first day, games) for each.
+SERIES_LAYOUT = ((1, 3), (4, 3))
+
+
+def round_robin(
+    teams: list[str], layout: tuple[tuple[int, int], ...] = SERIES_LAYOUT
+) -> list[tuple[int, str, str, int]]:
+    """A test week of series: in each block of `layout` the teams pair up (one
+    sits when the count is odd) and play that opponent every game of the
+    block, rotating partners and home field between blocks. Games are
+    (day, away, home, series id); the id lets the rotation logic keep a
+    starter to one start per series."""
     names = list(teams) + ([None] if len(teams) % 2 else [])
     n = len(names)
     games = []
-    for day in range(days):
-        r = day % (n - 1)
+    for slot, (first, length) in enumerate(layout):
+        r = slot % (n - 1)
         order = [names[0]] + names[1:][r:] + names[1:][:r]
         for i in range(n // 2):
             a, b = order[i], order[n - 1 - i]
             if a is None or b is None:
                 continue
-            away, home = (a, b) if (day // (n - 1) + i) % 2 else (b, a)
-            games.append((day, away, home))
-    return games
+            away, home = (a, b) if (slot + i) % 2 else (b, a)
+            games += [(first + k, away, home, slot * n + i) for k in range(length)]
+    return sorted(games, key=lambda g: g[0])
 
 
 def sample_mlb_week(teams: dict[str, WeekTeam]) -> MlbWeek:
