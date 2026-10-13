@@ -228,3 +228,34 @@ def test_infield_in_holds_the_runner_on_third():
 def test_no_rules_plays_straight_up():
     events = simulate_game(AWAY, HOME, DEFAULT_ENV, 5)
     assert not any("alignment" in e for e in events if e["type"] == "pa")
+
+
+class _NoChances:
+    """An rng whose chance events never happen: no double play, no fielder's
+    choice, no optional extra base."""
+
+    def random(self) -> float:
+        return 0.999
+
+
+@pytest.mark.parametrize(
+    "on, after, runs",
+    [
+        ((1, 1, 1), (0, 1, 1), 1),  # bases loaded: everyone is forced
+        ((1, 1, 0), (0, 1, 1), 0),
+        ((1, 0, 1), (0, 1, 1), 0),  # the runner on third isn't forced
+        ((0, 1, 0), (0, 1, 0), 0),
+        ((0, 0, 1), (0, 0, 1), 0),
+    ],
+)
+def test_groundout_at_first_moves_forced_runners(on, after, runs):
+    from npl_sim.engine.game import GameSim, Runner
+
+    sim = GameSim(AWAY, HOME, DEFAULT_ENV, 1)
+    sim.rng = _NoChances()
+    batter, *runners = (Runner(h, "p") for h, _ in AWAY.lineup[:4])
+    sim.bases = [r if o else None for r, o in zip(runners, on, strict=True)]
+    scored: list = []
+    assert sim._ground_out(batter, scored) == "GO"
+    assert sim.outs == 1 and len(scored) == runs
+    assert tuple(int(b is not None) for b in sim.bases) == after
