@@ -40,8 +40,8 @@ def test_runs_hook_pulls_a_starter_who_is_getting_hit():
     for seed in range(60):
         events = simulate_game(average_team("Away"), home, DEFAULT_ENV, seed)
         assert all(r < 4 for r in starter_lines(events, "Home", "Home-SP"))
-        change = next(e for e in events if e["type"] == "pitching_change" and e["team"] == "Home")
-        pulled_for_runs += change["reason"] == "runs"
+        changes = [e for e in events if e["type"] == "pitching_change" and e["team"] == "Home"]
+        pulled_for_runs += bool(changes) and changes[0]["reason"] == "runs"  # or a complete game
     assert pulled_for_runs > 40
 
 

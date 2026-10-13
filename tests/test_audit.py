@@ -2,12 +2,14 @@
 
 import csv
 import json
+from dataclasses import replace
 
 import pandas as pd
 import pytest
 
-from npl_sim.audit import game_records, write_audit
+from npl_sim.audit import DECISIONS, game_records, write_audit
 from npl_sim.cli import main
+from npl_sim.engine.bullpen import ReliefUsage
 from npl_sim.engine.defaults import DEFAULT_ENV
 from npl_sim.engine.game import simulate_game
 from npl_sim.engine.sample import average_team, average_week_team, busy_week
@@ -26,8 +28,10 @@ def test_auditing_changes_nothing():
         away, home, DEFAULT_ENV, 4
     )
     events = simulate_game(away, home, DEFAULT_ENV, 4)
-    assert len(trail) == sum(e["type"] == "pa" for e in events)
-    assert all(events[d["event"]]["type"] == "pa" for d in trail)
+    kinds = [events[d["event"]]["type"] for d in trail]
+    assert kinds[0] == "game_start" and set(trail[0]["setup"]) == {"away", "home"}
+    assert kinds.count("pa") == sum(e["type"] == "pa" for e in events)
+    assert kinds.count("pitching_change") == sum(e["type"] == "pitching_change" for e in events)
 
 
 def week_talent(teams) -> WeekTalent:
@@ -69,6 +73,37 @@ def test_records_cover_every_plate_appearance():
     assert batter["real"]["season to date"]["vs_R"]["PA"] == 120
     assert batter["card"]  # the rates the engine played him at
     assert json.dumps(records)  # plain JSON all the way down
+
+    setups = [r for r in records if r["record"] == "setup"]
+    assert [r["side"] for r in setups] == ["away", "home"]
+    assert setups[0]["hook"]["max_runs"] and setups[0]["pitch_limits"]
+    decisions = [r for r in records if r["record"] == "decision"]
+    changes = [r for r in decisions if r["kind"] == "pitching_change"]
+    events = game["events"]
+    assert len(decisions) == sum(e["type"] in DECISIONS for e in events)
+    assert len(changes) == sum(e["type"] == "pitching_change" for e in events) > 0
+    for r in changes:
+        assert r["reason"] and r["out_name"] and r["into_name"]
+        assert r["pitches"] >= 0 and r["into"] in r["available"]  # who he was picked from
+    # Decisions sit among the PAs in game order.
+    order = [r["record"] for r in records if r["record"] in ("pa", "decision")]
+    assert order.index("decision") > 0
+
+
+def test_pitching_change_shows_role_and_tier():
+    away, home = average_team("Away"), average_team("Home")
+    relief = {p.id: ReliefUsage(role="high") for p in home.bullpen}
+    home = replace(home, relief=relief)
+    trail: list = []
+    events = simulate_game(away, home, DEFAULT_ENV, 5, trail)
+    game = {"away": "Away", "home": "Home", "events": events, "audit": trail}
+    changes = [
+        r
+        for r in game_records(game, 1)
+        if r["record"] == "decision" and r["kind"] == "pitching_change" and r["team"] == home.name
+    ]
+    assert changes and all(r["role"] == "high" and r["stint_outs"] == 3 for r in changes)
+    assert all(r["situation"] in ("mopup", "early", "high", "medium", "low") for r in changes)
 
 
 def test_stat_lines_from_statcast_pas():

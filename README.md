@@ -157,7 +157,12 @@ plate appearance (game state, the batter's, pitcher's and league's input
 rates, park, defense and fatigue, the outcome odds the engine drew from, the
 result, batted-ball type, fielder, runners, count, the simulated pitches,
 WPA and leverage) and each player's card, talent-blend layers and real MLB
-stat lines by season and opponent hand; plus `pas.csv`, one row per PA.
+stat lines by season and opponent hand. Between the PAs, in game order, are
+the manager and baserunning decisions (pitching changes with the reason, the
+outgoing pitcher's pitches and runs, leverage, the bullpen tier and the
+reliever's role; pinch hitters; defensive subs; steals), and each team's
+settings behind them (pitch limits, hook, bullpen roles and stints, pinch-hit
+rules). Plus `pas.csv`, one row per PA.
 
 Calibration harness (`npl_sim/calibration/`, Milestone 8): `npl-sim
 calibrate` and `tests/test_calibration.py` check that box scores add up,
