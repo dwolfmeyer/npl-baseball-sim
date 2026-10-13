@@ -147,9 +147,14 @@ MLB rates.
 
 Weekly playing time (`engine/workload.py`, `play_week`): each player's sim
 week follows his real one. Hitters get 1.25x their MLB PA and start while
-they have 3 or more left; a hitter who can't is replaced by the bench player
-who fits his position with the most PA left, else a (AAA) stand-in at
-Scoresheet's penalty levels (`engine/replacement.py`). Starters get their MLB
+they have 3 or more left. A hitter who can't is covered the way a manager uses
+his bench, hardest positions first: a bench player eligible there, else the
+DH if he's eligible there (a bench bat then DHs), else the same through a
+manager's move (only catchers catch; 1B to a corner outfield spot; 3B to 1B or
+a corner; SS/2B anywhere on the infield; OF anywhere in the outfield), else
+another fielder sliding over while the bench or DH covers his spot. Only then
+does a (AAA) stand-in play, at Scoresheet's penalty levels
+(`engine/replacement.py`). Defensive-spectrum costs still apply. Starters get their MLB
 starts plus up to one carried from last week, in rotation order with four
 days' rest; with nobody able to start, the rested reliever with the most
 innings left opens a bullpen game. Relievers get 1.5x their MLB relief outs,

@@ -140,3 +140,65 @@ def test_standins_hit_at_scoresheet_penalty_levels():
     assert 0.11 < avg["AAA-C"] < 0.16  # ~.135
     assert 0.14 < avg["AAA-SS"] < 0.20  # ~.170
     assert 0.16 < avg["AAA-LF"] < 0.21  # ~.185
+
+
+def _cover_game(lineup, fields, pa, bench=()):
+    """game_card for a one-off lineup: `pa` is each hitter's MLB PA this week."""
+    from dataclasses import replace
+
+    from npl_sim.engine.sample import average_team, hitter, pitcher
+    from npl_sim.engine.workload import WeekTeam, game_card
+
+    team_card = average_team("T")
+    hitters = {pid: hitter(pid) for pid, _ in lineup}
+    hitters.update({pid: hitter(pid) for pid in bench})
+    team = WeekTeam(
+        card=replace(team_card, lineup=[(hitters[p], pos) for p, pos in lineup]),
+        lineups={},
+        rotation=[pitcher("SP")],
+        bench=[hitters[p] for p in bench],
+        fields={pid: set(f) for pid, f in fields.items()},
+    )
+    state = WeekState.open(MlbWeek(pa=pa, starts={"SP": 1}), Carry())
+    card, moves = game_card(team, state, 0, pitcher("SP"), "R")
+    return [(h.id, pos) for h, pos in card.lineup], moves
+
+
+LINEUP = [("C1", "C"), ("SS1", "SS"), ("2B1", "2B"), ("CF1", "CF"), ("3B1", "3B"),
+          ("1B1", "1B"), ("LF1", "LF"), ("RF1", "RF"), ("C2", "DH")]  # fmt: skip
+FIELDS = {p: {pos} for p, pos in LINEUP if pos != "DH"} | {"C2": {"C"}}
+FULL = {p: 25 for p, _ in LINEUP}
+
+
+def test_qualified_dh_catches_before_a_standin():
+    # Dave's case: the catcher has no PA and the DH is a qualified catcher.
+    lineup, moves = _cover_game(LINEUP, FIELDS | {"BN": {"2B"}}, FULL | {"C1": 0, "BN": 10}, ["BN"])
+    assert lineup[8] == ("C2", "C") and lineup[0] == ("BN", "DH")  # the bench bat DHs
+    assert moves.shifted == [{"player": "C2", "from": "DH", "to": "C"}]
+    assert not any(r["standin"] for r in moves.replaced)
+    # With nobody on the bench, the stand-in DHs instead of catching.
+    lineup, moves = _cover_game(LINEUP, FIELDS, FULL | {"C1": 0})
+    assert lineup[8] == ("C2", "C") and lineup[0][0].startswith("AAA-") and lineup[0][1] == "DH"
+
+
+def test_only_catchers_catch():
+    fields = FIELDS | {"C2": {"1B"}, "BN": {"SS", "2B"}}
+    lineup, moves = _cover_game(LINEUP, fields, FULL | {"C1": 0, "BN": 10}, ["BN"])
+    assert lineup[0][0].startswith("AAA-") and lineup[0][1] == "C"
+
+
+def test_flex_moves_and_sliding_fielders():
+    # A bench second baseman covers short (2B -> SS is a manager's move).
+    fields = FIELDS | {"BN": {"2B"}}
+    lineup, moves = _cover_game(LINEUP, fields, FULL | {"SS1": 0, "BN": 10}, ["BN"])
+    assert lineup[1] == ("BN", "SS") and not moves.shifted
+    # Center fielder out, only a first baseman on the bench: the left fielder
+    # slides to center and the first baseman plays left.
+    fields = FIELDS | {"BN": {"1B"}}
+    lineup, moves = _cover_game(LINEUP, fields, FULL | {"CF1": 0, "BN": 10}, ["BN"])
+    assert lineup[6] == ("LF1", "CF") and lineup[3] == ("BN", "LF")
+    assert moves.shifted == [{"player": "LF1", "from": "LF", "to": "CF"}]
+    # Nobody can get to short: a third baseman can't, so a stand-in plays there.
+    fields = FIELDS | {"BN": {"3B"}}
+    lineup, moves = _cover_game(LINEUP, fields, FULL | {"SS1": 0, "BN": 10}, ["BN"])
+    assert lineup[1][0].startswith("AAA-") and lineup[1][1] == "SS"

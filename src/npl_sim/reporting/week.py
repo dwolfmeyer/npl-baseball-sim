@@ -59,6 +59,8 @@ def _notes(g: dict, team: str, names: dict[str, str]) -> list[str]:
     for r in m.replaced:
         who = "a (AAA) stand-in" if r["standin"] else name(r["into"])
         notes.append(f"{name(r['out'])} out of PA or didn't play: {who} at {r['position']}")
+    for m_ in getattr(m, "shifted", []):
+        notes.append(f"{name(m_['player'])} moved from {m_['from']} to {m_['to']} to cover")
     if m.unavailable:
         notes.append("Resting or out of innings: " + ", ".join(name(p) for p in m.unavailable))
     if m.standin_pitcher:
