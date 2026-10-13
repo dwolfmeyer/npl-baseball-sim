@@ -120,7 +120,7 @@ def test_save_schedule_writes_weeks_and_games(season_2026):
 
 def test_mlb_style_series_off_days_and_road_trips(season_2026):
     """Dave (2026-10-12): 2- and 3-game series with off and travel days, so
-    starters on four days' rest and rested relievers line up."""
+    the rotation and the pen line up."""
     _, schedule = season_2026
     assert {item.series.games for item in schedule} == {2, 3}
     days: dict[str, list] = {}

@@ -175,7 +175,7 @@ play-by-play, the audit log (`thrown_out`) and the season totals (OOB).
 
 Weekly playing time (`engine/workload.py`, `play_week`): each player's sim
 week follows his real one. Hitters get 1.25x their MLB PA and start while
-they have 3 or more left. A hitter who can't is covered the way a manager uses
+they have any left. A hitter who can't is covered the way a manager uses
 his bench, hardest positions first: a bench player eligible there, else the
 DH if he's eligible there (a bench bat then DHs), else the same through a
 manager's move (only catchers catch; 1B to a corner outfield spot; 3B to 1B or
@@ -183,11 +183,11 @@ a corner; SS/2B anywhere on the infield; OF anywhere in the outfield), else
 another fielder sliding over while the bench or DH covers his spot. Only then
 does a (AAA) stand-in play, at Scoresheet's penalty levels
 (`engine/replacement.py`). Defensive-spectrum costs still apply. Starters get their MLB
-starts plus up to one carried from last week, in rotation order with four
-days' rest; with nobody able to start, the rested reliever with the most
-innings left opens a bullpen game. Relievers get 1.5x their MLB relief outs,
-no third day in a row, and a day off after 25 pitches (two after 40). Unused
-starts, the rotation turn and rest carry into next week. `npl_sim/playing_time.py`
+starts plus up to one carried from last week, in rotation order; with nobody
+able to start, the reliever with the most innings left opens a bullpen game.
+Relievers get 1.5x their MLB relief outs. There are no rest-day rules (no
+days between starts, no limit on pitching days in a row), so the budgets are
+the only limit. Unused starts and the rotation turn carry into next week. `npl_sim/playing_time.py`
 reads a real week from the pipeline's clean tables.
 
 `npl-sim sim-week` (`npl_sim/simweek.py`) plays a week between the test teams'
