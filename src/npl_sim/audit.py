@@ -10,14 +10,15 @@ kinds of records (the "record" key):
 - setup: one per team, the owner's settings behind the manager decisions:
   pitch limits, the starter's hook (runs, times through, leverage), bullpen
   roles and stint lengths, weekly outs caps, pinch-hit rules, defensive
-  subs, steal aggressiveness and alignment rules.
+  subs, bunting and baserunning settings, and alignment rules.
 - decision: one per non-PA event, in game order with the PAs: pitching
   changes (why, the outgoing pitcher's pitches, batters faced and runs,
   leverage, the bullpen situation tier, the reliever's role and who else was
   available), pinch hitters (leverage, expected run gain), defensive subs,
   steals and caught stealing, the extra-inning runner, and wild pitches,
   passed balls and balks. Sacrifice-bunt PAs carry `"bunt": true` in
-  their outcome and the bunt's odds in place of the swing-away odds.
+  their outcome and the bunt's odds in place of the swing-away odds; runners
+  thrown out taking an extra base are in the outcome's `thrown_out`.
 - player: each batter and pitcher who took part, with the card rates the
   engine used (vs LHP/RHP or vs LHB/RHB), the talent blend's indexes and
   layers (baseline, process, results), and real stat lines by season and
@@ -199,6 +200,7 @@ def game_records(game: dict, number: int, seed: int | None = None, talent=None) 
                     "k_type": e.get("k_type"),
                     "bunt": bool(e.get("bunt")),
                     "ground_rule": bool(e.get("ground_rule")),
+                    "thrown_out": e.get("thrown_out", []),
                     "outs": e["outs"],
                     "runs": len(e["scored"]),
                     "rbi": e["rbi"],

@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from npl_sim.engine.box import box_score
 from npl_sim.engine.defaults import DEFAULT_ENV
 from npl_sim.engine.game import simulate_game
-from npl_sim.engine.manager import STYLES
+from npl_sim.engine.manager import AGGRESSION, BUNT_STRATEGIES, STYLES
 from npl_sim.engine.playlog import game_log
 from npl_sim.league import load_league_file, team_slots
 from npl_sim.reporting import gameday
@@ -62,6 +62,9 @@ TEMPLATES.env.globals.update(
     pinch_leverage=lineup.PINCH_LEVERAGE,
     pinch_gains=lineup.PINCH_GAINS,
     pinch_max=lineup.PINCH_MAX,
+    bunt_strategies=BUNT_STRATEGIES,
+    steal_levels=AGGRESSION,
+    extra_base_levels=lineup.EXTRA_BASE,
 )
 
 

@@ -27,7 +27,14 @@ from npl_sim.engine.hooks import (
     DEFAULT_MAX_RUNS,
     StarterHook,
 )
-from npl_sim.engine.manager import DEFAULT_STYLE, STYLES, PinchHitting
+from npl_sim.engine.manager import (
+    AGGRESSION,
+    BUNT_STRATEGIES,
+    DEFAULT_STYLE,
+    STYLES,
+    Baserunning,
+    PinchHitting,
+)
 from npl_sim.engine.sample import hitter, pitcher
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
@@ -174,6 +181,34 @@ class PinchPlan:
         )
 
 
+# Extra-base choices: every runner goes station to station only at "Never".
+EXTRA_BASE = {k: v for k, v in AGGRESSION.items() if k > 0}
+DEFAULT_BUNTING = "late_close"
+
+
+@dataclass
+class RunningPlan:
+    """Bunting, stealing and baserunning (Dave, 2026-10-13): a bunting
+    strategy (engine/manager.py BUNT_STRATEGIES), how aggressively the team
+    steals and takes the extra base (AGGRESSION), and the hitters who may not
+    steal."""
+
+    bunting: str = DEFAULT_BUNTING
+    steal: float = 1.0
+    extra_base: float = 1.0
+    no_steal: list[int] = field(default_factory=list)
+
+    def bunt_rule(self):
+        return BUNT_STRATEGIES.get(self.bunting, BUNT_STRATEGIES[DEFAULT_BUNTING])[1]
+
+    def rule(self) -> Baserunning:
+        return Baserunning(
+            steal=self.steal,
+            extra_base=self.extra_base,
+            no_steal=tuple(str(i) for i in self.no_steal),
+        )
+
+
 @dataclass
 class DefensiveSub:
     """A late-game defensive replacement: `player` comes off the bench to play
@@ -234,6 +269,7 @@ class LineupCard:
     # hooks and the pinch-hitting rules, which the owner can then edit.
     style: str = DEFAULT_STYLE
     pinch: PinchPlan = field(default_factory=lambda: PinchPlan.of(STYLES[DEFAULT_STYLE].pinch))
+    running: RunningPlan = field(default_factory=RunningPlan)
 
     def apply_style(self, name: str) -> None:
         """Fill every rotation slot's hook and the pinch-hitting rules from a style."""
@@ -270,6 +306,7 @@ class LineupCard:
             "relief": {str(k): asdict(v) for k, v in self.relief.items()},
             "style": self.style,
             "pinch": asdict(self.pinch),
+            "running": asdict(self.running),
         }
 
     @classmethod
@@ -287,6 +324,7 @@ class LineupCard:
             pinch=PinchPlan(**data["pinch"])
             if "pinch" in data
             else PinchPlan.of(STYLES[DEFAULT_STYLE].pinch),
+            running=RunningPlan(**data["running"]) if "running" in data else RunningPlan(),
         )
 
     @classmethod
@@ -365,6 +403,20 @@ class LineupCard:
                 never_for=[int(i) for i in getlist("ph_never") if str(i).isdigit()],
             )
         )
+        # Forms without the baserunning fields (older pages) keep the defaults.
+        running = RunningPlan()
+        if get("run_form"):
+            may_steal = {int(i) for i in getlist("steal_ok") if str(i).isdigit()}
+            running = RunningPlan(
+                bunting=get("bunting") if get("bunting") in BUNT_STRATEGIES else DEFAULT_BUNTING,
+                steal=choice("steal", AGGRESSION, float, 1.0),
+                extra_base=choice("extra_base", EXTRA_BASE, float, 1.0),
+                no_steal=[
+                    int(i)
+                    for i in getlist("steal_listed")
+                    if str(i).isdigit() and int(i) not in may_steal
+                ],
+            )
         style = get("style") if get("style") in STYLES else DEFAULT_STYLE
         card = cls(
             active=[int(a) for a in active if str(a).isdigit()],
@@ -387,6 +439,7 @@ class LineupCard:
             relief=relief,
             style=style,
             pinch=pinch,
+            running=running,
         )
         # A newly picked style is a preset: it fills the hooks and pinch rules.
         if get("style_prev") and get("style_prev") != style:
@@ -757,6 +810,8 @@ def team_card(
             if p.mlb_id in card.active and p.mlb_id not in starting and not is_pitcher(p)
         ),
         pinch=card.pinch.rule(),
+        bunt=card.running.bunt_rule(),
+        running=card.running.rule(),
         # The piggyback follows the opener before anyone is picked by leverage.
         follow=tuple(str(a.id) for a in bulk),
     )

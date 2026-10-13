@@ -459,7 +459,8 @@ def _sim_season(args: argparse.Namespace, league_file) -> int:
     print(
         f"\nRuns/team-game {t['runs'] / t['games'] / 2:.2f}  K% {100 * t['K'] / pa:.1f}  "
         f"BB% {100 * t['BB'] / pa:.1f}  HR/PA {100 * t['HR'] / pa:.2f}%  AVG {hits / ab:.3f}  "
-        f"SB {t['stolen_base']} CS {t['caught_stealing']}  pitches/PA {t['pitches'] / pa:.2f}"
+        f"SB {t['stolen_base']} CS {t['caught_stealing']} OOB {t['thrown_out']}  "
+        f"pitches/PA {t['pitches'] / pa:.2f}"
     )
     bullpen = Counter(team for g in result.games for team, b in g.bullpen_game.items() if b)
     rest = result.starter_rest()

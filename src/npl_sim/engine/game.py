@@ -16,6 +16,7 @@ wild pitches, passed balls (runs unearned) and balks.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import asdict, dataclass, field
 
@@ -23,7 +24,7 @@ from npl_sim.engine import bullpen as pen
 from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
-from npl_sim.engine.manager import Bunting, PinchHitting, run_value
+from npl_sim.engine.manager import Baserunning, Bunting, PinchHitting, run_value
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
 
 # Mean pitches per PA by outcome.
@@ -45,6 +46,26 @@ BUNT_ODDS = {
     "K": 0.08,
 }
 HIT_BASES = {"1B": 1, "2B": 2, "3B": 3}
+# Base stealing (_maybe_steal). A runner's attempt rate per time on first
+# becomes a chance before each PA he's on first with second open; tuned so a
+# league of average runners tries about as often as MLB in 2024-25 (0.96 a
+# team game, about one in ten of them for third).
+STEAL_PER_PA = 1.12
+STEAL_THIRD = 0.6  # relative chance of trying for third from second
+# Success, on the log-odds scale: per unit of catcher arm (about 5 points of
+# success rate), the pitcher's hand holding the runner at first, the
+# easier steal of third, and per step of owner aggressiveness above normal.
+STEAL_CATCHER = 0.3
+STEAL_LEFTY, STEAL_RIGHTY = -0.2, 0.07  # about even over MLB's mix of hands
+STEAL_THIRD_EASIER = 0.3
+STEAL_AGGRESSION = 0.3
+# A runner without a real record: the league's, scaled by sprint speed so a
+# league of runners averages out to the league rate.
+SPEED_ATTEMPT, SPEED_SUCCESS = 0.9, 0.25
+# Taking the extra base (_send): how much a runner's sprint speed (z-score)
+# and the outfield arms move the odds he's safe, and how much riskier the
+# extra sends of an aggressive manager are, on the log-odds scale.
+SEND_SPEED, SEND_ARM, SEND_AGGRESSION = 0.5, 0.4, 0.6
 
 
 @dataclass(frozen=True)
@@ -61,6 +82,11 @@ class Hitter:
     # Throwing arm, about -2..+2: pop time for a catcher, arm strength for an
     # outfielder (talent/fielding.py). Holds runners in fielding.team_defense.
     arm: float = 0.0
+    # Base stealing from his real MLB record (talent/running.py): attempts per
+    # time on first and the share he makes. None = the league's, adjusted for
+    # his sprint speed.
+    steal_attempt: float | None = None
+    steal_success: float | None = None
 
     def side_vs(self, throws: str) -> str:
         if self.bats == "S":
@@ -125,7 +151,6 @@ class TeamCard:
     park: ParkFactors | None = None  # used when this team is home
     # Owner's opt-in alignment rules, checked in order; none = straight up all game.
     alignment_rules: tuple[AlignmentRule, ...] = ()
-    steal_aggressiveness: float = 1.0  # 0 = never run, 1 = normal, 2 = aggressive
     abbr: str = ""  # short name for scores in the play log; defaults to the first 3 letters
     defensive_subs: tuple[DefensiveSub, ...] = ()
     # Bullpen designations by pitcher id. Empty = relievers enter in listed order.
@@ -142,6 +167,8 @@ class TeamCard:
     bench: tuple[Hitter, ...] = ()
     pinch: PinchHitting = field(default_factory=PinchHitting)
     bunt: Bunting = field(default_factory=Bunting)
+    # Stealing and taking the extra base: how aggressive, and who may steal.
+    running: Baserunning = field(default_factory=Baserunning)
 
     @property
     def short(self) -> str:
@@ -204,6 +231,7 @@ class GameSim:
         self.alignment = "normal"  # the fielding team's alignment for the current PA
         self._homer = False  # every run counts on a walk-off home run
         self._ground_rule = False  # the last double bounced out of play
+        self._outs_on_bases: list[dict] = []  # runners thrown out on the last PA
 
     # -- helpers -------------------------------------------------------------
     def _log(self, kind: str, **data) -> None:
@@ -336,7 +364,8 @@ class GameSim:
                 }
                 for s in card.defensive_subs
             ],
-            "steal_aggressiveness": card.steal_aggressiveness,
+            "bunt": asdict(card.bunt),
+            "running": asdict(card.running),
             "alignment_rules": [asdict(r) for r in card.alignment_rules],
         }
 
@@ -570,19 +599,41 @@ class GameSim:
         )
 
     def _maybe_steal(self) -> None:
-        runner = self.bases[0]
-        if runner is None or self.bases[1] is not None:
-            return
+        """Before a pitch: a runner on first with second open may steal second,
+        or one on second with first and third open may steal third (never
+        with two out). How often comes from his real attempt rate times the
+        owner's aggressiveness; whether he makes it from his real success rate,
+        the catcher's arm (pop time and caught-stealing record), and the
+        pitcher's hand holding him at first."""
         offense, defense = self._batting(), self._fielding()
-        attempt = 0.045 * offense.card.steal_aggressiveness * (1 + 0.8 * runner.hitter.speed)
-        if attempt <= 0 or self.rng.random() >= attempt:
+        run, b = offense.card.running, self.bases
+        if b[0] is not None and b[1] is None:
+            runner, base = b[0], "2B"
+        elif b[1] is not None and b[0] is None and b[2] is None and self.outs < 2:
+            runner, base = b[1], "3B"
+        else:
             return
-        success = 0.78 + 0.06 * runner.hitter.speed - 0.08 * defense.defense.catcher_arm
-        if self.rng.random() < min(max(success, 0.4), 0.95):
-            self.bases[0], self.bases[1] = None, runner
+        if run.steal <= 0 or runner.hitter.id in run.no_steal or not self._steal_spot(offense):
+            return
+        attempt, success = steal_odds(runner.hitter, self.env)
+        chance = STEAL_PER_PA * attempt * run.steal * (STEAL_THIRD if base == "3B" else 1.0)
+        if self.rng.random() >= chance:
+            return
+        logit = _logit(success) - STEAL_CATCHER * defense.defense.catcher_arm
+        logit -= STEAL_AGGRESSION * (run.steal - 1)  # aggressive managers run in worse spots
+        if base == "3B":
+            logit += STEAL_THIRD_EASIER
+        else:  # a lefty faces first and holds the runner; righties a little easier
+            logit += STEAL_LEFTY if defense.pitcher.throws == "L" else STEAL_RIGHTY
+        made = _sigmoid(logit)
+        if self.rng.random() < made:
+            if base == "2B":
+                self.bases[0], self.bases[1] = None, runner
+            else:
+                self.bases[1], self.bases[2] = None, runner
             kind = "stolen_base"
         else:
-            self.bases[0] = None
+            self.bases[0 if base == "2B" else 1] = None
             self.outs += 1
             defense.pitcher_outs += 1
             kind = "caught_stealing"
@@ -590,10 +641,17 @@ class GameSim:
             kind,
             runner=runner.hitter.id,
             pitcher=defense.pitcher.id,
-            base="2B",
+            base=base,
             outs_after=self.outs,
             bases_after=self._bases(),
+            odds={"attempt": round(chance, 4), "success": round(made, 4)},
         )
+
+    def _steal_spot(self, offense: _Side) -> bool:
+        """Baseball's custom: nobody runs with a big lead, or trailing by three
+        or more late, when an out costs more than the base gains."""
+        lead = offense.runs - self._fielding().runs
+        return lead < 5 and not (self.inning >= 7 and lead <= -3)
 
     def _maybe_wild_pitch(self) -> None:
         """A wild pitch, passed ball or balk: every runner moves up a base."""
@@ -723,6 +781,7 @@ class GameSim:
         before = list(self.bases)
         scored: list[dict] = []
         self._homer = self._ground_rule = False
+        self._outs_on_bases = []
         outcome = self._resolve(result, hitter, pitcher, scored)
         if outcome in HIT_BASES and scored and self._walkoff():
             outcome = self._walkoff_hit(outcome, hitter, before, scored)
@@ -738,6 +797,8 @@ class GameSim:
             extra["bunt"] = True
         if self._ground_rule and outcome == "2B":
             extra["ground_rule"] = True
+        if self._outs_on_bases:
+            extra["thrown_out"] = self._outs_on_bases
         if outcome == "K":
             extra["k_type"] = "bunt" if bunt is not None else detail.strikeout_kind(drng)
         elif outcome == "HR":
@@ -782,7 +843,11 @@ class GameSim:
                 end = bases[after[r.id]]
             else:
                 end = "out"
-            moves.append({"runner": r.id, "start": start, "end": end})
+            move = {"runner": r.id, "start": start, "end": end}
+            at = next((o["base"] for o in self._outs_on_bases if o["runner"] == r.id), None)
+            if end == "out" and at:
+                move["out_at"] = at
+            moves.append(move)
         return moves
 
     def _walkoff_hit(self, outcome: str, hitter: Hitter, before: list, scored: list) -> str:
@@ -838,16 +903,23 @@ class GameSim:
                 self._score(b[2], scored)
             third = None
             if b[1]:
-                p = 0.62 + 0.08 * b[1].hitter.speed - 0.06 * arm + (0.25 if self.outs == 2 else 0)
-                if rng.random() < p:
+                two_out = 0.25 if self.outs == 2 else 0  # running on contact
+                go = self._send(b[1], 0.62 + 0.08 * b[1].hitter.speed - 0.06 * arm + two_out, 0.95)
+                if go:
                     self._score(b[1], scored)
+                elif go is False:
+                    self._thrown_out(b[1], "home")
                 else:
                     third = b[1]
             second = None
             if b[0]:
-                p = 0.27 + 0.07 * b[0].hitter.speed - 0.05 * arm
-                if third is None and rng.random() < p:
+                go = None
+                if third is None and self.outs < 3:
+                    go = self._send(b[0], 0.27 + 0.07 * b[0].hitter.speed - 0.05 * arm, 0.96)
+                if go:
                     third = b[0]
+                elif go is False:
+                    self._thrown_out(b[0], "3B")
                 else:
                     second = b[0]
             self.bases = [batter, second, third]
@@ -862,9 +934,12 @@ class GameSim:
             if b[0] and self._ground_rule:
                 third = b[0]
             elif b[0]:
-                p = 0.42 + 0.10 * b[0].hitter.speed - 0.06 * arm + (0.2 if self.outs == 2 else 0)
-                if rng.random() < p:
+                two_out = 0.2 if self.outs == 2 else 0
+                go = self._send(b[0], 0.42 + 0.10 * b[0].hitter.speed - 0.06 * arm + two_out, 0.92)
+                if go:
                     self._score(b[0], scored)
+                elif go is False:
+                    self._thrown_out(b[0], "home")
                 else:
                     third = b[0]
             self.bases = [None, batter, third]
@@ -885,15 +960,54 @@ class GameSim:
             return self._ground_out(batter, scored)
         self.outs += 1
         if bip == "FB" and self.outs < 3:
-            if b[2] and rng.random() < 0.55 + 0.08 * b[2].hitter.speed - 0.06 * arm:
+            go = (
+                self._send(b[2], 0.55 + 0.08 * b[2].hitter.speed - 0.06 * arm, 0.96)
+                if b[2]
+                else None
+            )
+            if go:
                 self._score(b[2], scored)
                 b[2] = None
                 if b[1] and rng.random() < 0.25:
                     b[2], b[1] = b[1], None
                 return "SF"
-            if b[1] and not b[2] and rng.random() < 0.22:
-                b[2], b[1] = b[1], None
+            if go is False:  # tagged and thrown out at the plate: a double play
+                self._thrown_out(b[2], "home")
+                b[2] = None
+            elif b[1] and not b[2]:
+                go = self._send(b[1], 0.22, 0.97)
+                if go:
+                    b[2], b[1] = b[1], None
+                elif go is False:
+                    self._thrown_out(b[1], "3B")
+                    b[1] = None
         return {"FB": "FO", "LD": "LO", "PU": "PO"}[bip]
+
+    def _send(self, runner: Runner, take: float, safe: float) -> bool | None:
+        """Whether a runner goes for the extra base on a hit or a fly, and how
+        it ends: None he holds, True he makes it, False he's thrown out.
+
+        `take` is how often a runner makes it with a normal manager (the old
+        MLB-calibrated rate, already moved by his speed and the outfield arms)
+        and `safe` how often a sent runner of average speed is safe. The owner's
+        extra-base aggressiveness sends him more or less often, and the roll for
+        safe is weighted by his sprint speed against the arms; an aggressive
+        manager's extra sends are closer plays."""
+        if self._walkoff() or self.outs >= 3:
+            return None
+        g = self._batting().card.running.extra_base
+        if g <= 0:
+            return None
+        go = 1 - (1 - min(max(take / safe, 0.0), 0.98)) ** g
+        if self.rng.random() >= go:
+            return None
+        arm = self._fielding().defense.of_arm
+        odds = _logit(safe) + SEND_SPEED * runner.hitter.speed - SEND_ARM * arm
+        return self.rng.random() < _sigmoid(odds - SEND_AGGRESSION * (g - 1))
+
+    def _thrown_out(self, runner: Runner, base: str) -> None:
+        self.outs += 1
+        self._outs_on_bases.append({"runner": runner.hitter.id, "base": base})
 
     def _bunt(self, res: str, batter: Runner) -> str:
         """A sacrifice-bunt attempt with nobody out, a runner on first or
@@ -957,6 +1071,27 @@ class GameSim:
             if b[0] and b[1] is None:
                 b[1], b[0] = b[0], None
         return "GO"
+
+
+def _logit(p: float) -> float:
+    p = min(max(p, 1e-6), 1 - 1e-6)
+    return math.log(p / (1 - p))
+
+
+def _sigmoid(x: float) -> float:
+    return 1 / (1 + math.exp(-x))
+
+
+def steal_odds(h: Hitter, env: LeagueEnv) -> tuple[float, float]:
+    """(attempts per time on first, success rate) for a runner: his real
+    record when the talent data has one, else the league's for his speed."""
+    attempt = h.steal_attempt
+    if attempt is None:
+        attempt = env.steal_attempt * math.exp(SPEED_ATTEMPT * h.speed - SPEED_ATTEMPT**2 / 2)
+    success = h.steal_success
+    if success is None:
+        success = _sigmoid(_logit(env.steal_success) + SPEED_SUCCESS * h.speed)
+    return attempt, success
 
 
 def simulate_game(
