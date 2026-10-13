@@ -235,6 +235,20 @@ class GameSim:
             return
         old = side.pitcher
         on_base = sum(r is not None for r in self.bases) if mid_inning else 0
+        if self.audit is not None:
+            self.audit.append(
+                {
+                    "event": len(self.events),  # the pitching_change logged below
+                    "pitches": side.pitches,
+                    "pitch_limit": old.pitch_limit,
+                    "batters_faced": side.batters_faced,
+                    "outs_recorded": side.pitcher_outs,
+                    "runs_charged": side.charged.get(old.id, 0),
+                    "available": [
+                        p.id for p in side.card.bullpen if p.id not in side.used and p.id != old.id
+                    ],
+                }
+            )
         side.pitcher = new
         side.used.add(new.id)
         side.pitches = 0
@@ -302,6 +316,30 @@ class GameSim:
         return pick, {"leverage": li, "situation": tier}
 
     # -- the game ------------------------------------------------------------
+    def _setup(self, card: TeamCard) -> dict:
+        """The owner's settings behind each manager decision, for the audit log."""
+        return {
+            "team": card.name,
+            "pitch_limits": {p.id: p.pitch_limit for p in (card.starter, *card.bullpen)},
+            "hook": asdict(card.hook),
+            "follow": list(card.follow),
+            "relief": {pid: {**asdict(u), "outs": u.outs} for pid, u in card.relief.items()},
+            "outs_limit": dict(card.outs_limit),
+            "pinch": asdict(card.pinch),
+            "defensive_subs": [
+                {
+                    "player": s.player.id,
+                    "position": s.position,
+                    "from_inning": s.from_inning,
+                    "only_when_leading": s.only_when_leading,
+                    "replaces": s.replaces,
+                }
+                for s in card.defensive_subs
+            ],
+            "steal_aggressiveness": card.steal_aggressiveness,
+            "alignment_rules": [asdict(r) for r in card.alignment_rules],
+        }
+
     def _start(self) -> None:
         def team(card: TeamCard) -> dict:
             pitchers = [card.starter, *card.bullpen]
@@ -340,6 +378,10 @@ class GameSim:
                 ],
             }
 
+        if self.audit is not None:
+            self.audit.append(
+                {"event": 0, "setup": {k: self._setup(v.card) for k, v in self.sides.items()}}
+            )
         self._log(
             "game_start",
             away=team(self.sides["away"].card),
@@ -899,13 +941,18 @@ class GameSim:
                 return "FC"
         self.outs += 1
         if self.outs < 3:
+            # The out is made at first, so runners forced on contact (a
+            # runner on first, and any runners in a row ahead of him) are
+            # already moving and take the next base; the others may try.
+            on_second = b[1] is not None and b[0] is not None
+            on_third = b[2] is not None and on_second
             home = (
                 (0.48 + 0.06 * b[2].hitter.speed) * play.get("score_from_third", 1.0) if b[2] else 0
             )
-            if b[2] and rng.random() < min(home, 0.95):
+            if b[2] and (on_third or rng.random() < min(home, 0.95)):
                 self._score(b[2], scored)
                 b[2] = None
-            if b[1] and b[2] is None and rng.random() < 0.55:
+            if b[1] and b[2] is None and (on_second or rng.random() < 0.55):
                 b[2], b[1] = b[1], None
             if b[0] and b[1] is None:
                 b[1], b[0] = b[0], None
