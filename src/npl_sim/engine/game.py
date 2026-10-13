@@ -55,7 +55,7 @@ class Hitter:
     vs_lhp: Rates
     vs_rhp: Rates
     speed: float = 0.0  # roughly sprint-speed z-score, -2..+2
-    # Fielding value (runs per 600 BIP vs the average there) at each position
+    # Fielding value (runs per 150 games vs the average there) at each position
     # he's experienced at; empty = average anywhere. See fielding.py.
     positions: dict[str, float] = field(default_factory=dict, hash=False, compare=False)
     # Throwing arm, about -2..+2: pop time for a catcher, arm strength for an

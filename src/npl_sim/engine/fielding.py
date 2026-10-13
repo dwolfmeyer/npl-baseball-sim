@@ -1,12 +1,13 @@
 """Fielders behind the pitcher: position ratings and the defensive spectrum.
 
-Each hitter may carry `positions`: his fielding value (runs per 600 balls in
-play, against the average fielder there) at the positions he is experienced
-at (MLB-eligible). Milestone 7 fills these from OAA/DRS; until then they are
-0.0, which makes the out-of-position rules below the only effect.
+Each hitter may carry `positions`: his fielding value (runs per 150 games,
+against the average fielder there) at the positions he is eligible at. The
+talent blend fills them from three-year averages of OAA, DRS and UZR
+(talent/fielding.py); a player without those is average (0.0) at each
+eligible position. On the 20-80 scale each 2.5 runs is one grade (5 points).
 
 Out of position (Dave, 2026-10-12): use Tango's defensive spectrum (runs per
-600 BIP, "Fielding Position Adjustments", The Book blog, 2006):
+150 games, "Fielding Position Adjustments", The Book blog, 2006):
 
     C +8, CF +5, SS +4, 2B 0, 3B -1, LF -4, RF -4, 1B -8   (DH -12: no glove)
 
@@ -31,6 +32,13 @@ experienced position, then:
 So a good shortstop plays second or third at little cost, a shortstop in left
 costs a few runs, and a left fielder in center or a first baseman at third
 costs a lot.
+
+Free moves (Dave, 2026-10-13): an outfielder can play any outfield spot, and a
+shortstop second or third, with no experience or out-of-position penalty. His
+rating still carries over along the spectrum, so an elite center fielder in
+right is better than elite there (two elite center fielders help in center
+and right), while a left fielder in center keeps only what Zimmerman measured
+corner outfielders lose in center.
 """
 
 from __future__ import annotations
@@ -63,17 +71,28 @@ PAIRS = {
 }  # fmt: skip
 
 # Share of each batted-ball type each fielder handles, and the league hit
-# rate on that type, to turn runs per 600 BIP into hit probability.
+# rate on that type, to turn runs per 150 games into hit probability.
 SHARE = {
     "GB": {"3B": 0.27, "SS": 0.30, "2B": 0.28, "1B": 0.15},
     "LD": {"LF": 0.22, "CF": 0.25, "RF": 0.22, "SS": 0.09, "2B": 0.08, "3B": 0.08, "1B": 0.06},
     "FB": {"LF": 0.32, "CF": 0.38, "RF": 0.30},
 }
-# A catcher's runs per 600 BIP at C are his framing; +3 (elite) is 3% more
-# strikeouts and fewer walks.
-FRAMING_CAP = 0.05
+# A catcher's runs at C are his framing runs per 150 games. Framing f moves
+# strikeouts up and walks down by f; one unit of f is worth about 380 runs over
+# a catcher's season (~4300 PA at ~0.09 runs per PA), so an elite +15 is 4%.
+FRAMING_RUNS = 380.0
+FRAMING_CAP = 0.06
 RUNS_PER_HIT_SAVED = 0.75  # a hit turned into an out, in runs
 LEAGUE_HIT_RATE = {"GB": 0.257, "LD": 0.662, "FB": 0.132}
+BIP_PER_SEASON = 3750  # a team's balls in play (no homers) in 150 games
+BIP_MIX = {"GB": 0.44, "LD": 0.21, "FB": 0.25}  # league share of balls in play by type
+
+
+# Share of all balls in play each fielder handles.
+CHANCES = {
+    pos: sum(BIP_MIX[b] * SHARE[b].get(pos, 0.0) for b in SHARE)
+    for pos in {p for shares in SHARE.values() for p in shares}
+}
 
 
 def _group(pos: str) -> str:
@@ -95,10 +114,19 @@ def gap(frm: str, to: str) -> float:
     return tango
 
 
+def free(frm: str, to: str) -> bool:
+    """A move with no experience penalty: outfield to outfield, or short to
+    second or third."""
+    return (frm in OUTFIELD and to in OUTFIELD) or (frm == "SS" and to in ("2B", "3B"))
+
+
 def move(rating: float, frm: str, to: str) -> float:
     """Value at `to` for a player rated `rating` at his experienced spot `frm`."""
     g = gap(frm, to)
-    value = rating + (DOWN_CREDIT * g if g > 0 else g) - EXPERIENCE
+    carried = rating + (DOWN_CREDIT * g if g > 0 else g)
+    if free(frm, to):
+        return carried
+    value = carried - EXPERIENCE
     if to == "C":
         value -= CATCHER
     elif to != "1B" and frm != "DH" and _group(frm) != _group(to):
@@ -107,7 +135,7 @@ def move(rating: float, frm: str, to: str) -> float:
 
 
 def rating_at(positions: dict[str, float], pos: str) -> float:
-    """A hitter's fielding value at `pos`, in runs per 600 BIP. Players with
+    """A hitter's fielding value at `pos`, in runs per 150 games. Players with
     no position data are treated as average anywhere."""
     if not positions or pos == "DH":
         return 0.0
@@ -117,7 +145,9 @@ def rating_at(positions: dict[str, float], pos: str) -> float:
 
 
 def out_of_position(positions: dict[str, float], pos: str) -> bool:
-    return bool(positions) and pos != "DH" and pos not in positions
+    if not positions or pos == "DH" or pos in positions:
+        return False
+    return not any(free(frm, pos) for frm in positions)
 
 
 def team_defense(base: Defense, lineup) -> Defense:
@@ -128,8 +158,10 @@ def team_defense(base: Defense, lineup) -> Defense:
         return base
     mult = dict(base.hit_mult)
     for bip, shares in SHARE.items():
-        hits = sum(share * runs.get(pos, 0.0) for pos, share in shares.items())
-        delta = -hits / (RUNS_PER_HIT_SAVED * 600)  # change in hit probability per BIP
+        # Each fielder's runs come off the balls he handles, so +R saves R runs
+        # over a season of balls in play, split by his share of each type.
+        hits = sum(share * runs.get(pos, 0.0) / CHANCES[pos] for pos, share in shares.items())
+        delta = -hits / (RUNS_PER_HIT_SAVED * BIP_PER_SEASON)  # hit probability per BIP
         mult[bip] = mult.get(bip, 1.0) * max(0.5, 1 + delta / LEAGUE_HIT_RATE[bip])
     catcher = runs.get("C", 0.0)
     at = {pos: h for h, pos in lineup}
@@ -142,7 +174,7 @@ def team_defense(base: Defense, lineup) -> Defense:
     return replace(
         base,
         hit_mult=mult,
-        framing=base.framing + max(-FRAMING_CAP, min(FRAMING_CAP, catcher / 100)),
+        framing=base.framing + max(-FRAMING_CAP, min(FRAMING_CAP, catcher / FRAMING_RUNS)),
         catcher_arm=base.catcher_arm + c_arm,
         of_arm=base.of_arm + (sum(outfield) / len(outfield) if outfield else 0.0),
     )

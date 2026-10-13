@@ -1,12 +1,15 @@
 """Fielders' and parks' real numbers, from the pipeline's Savant leaderboards.
 
-- Range: Statcast's fielding runs prevented (OAA in runs) at the player's
-  primary position, per 600 balls in play he was on the field for (counted
-  from the pitch data's fielder columns), this season and last weighted 5/4,
-  regressed toward average by FIELD_REGRESSION balls in play. Spec: "Rolling
-  OAA, DRS and arm, regressed and updated weekly".
-- Catchers: framing runs per 600 balls in play caught, regressed the same
-  way; pop time to second base sets his arm.
+- Range (Dave, 2026-10-13): at each position, the average of the fielding
+  metrics he has there (Statcast OAA in runs, DRS and UZR from FanGraphs'
+  fielding leaderboard) over this season to date and the three before,
+  weighted by innings, per 150 games (1350 innings), regressed toward average
+  by RANGE_REGRESSION innings. A player without them is average at each
+  eligible position (engine/fielding.py). Spec: "Rolling OAA, DRS and arm,
+  regressed and updated weekly".
+- Catchers: framing runs per 150 games caught, over the same seasons,
+  regressed by FRAMING_REGRESSION balls in play; pop time to second sets his
+  arm.
 - Outfield arms: Statcast arm strength (mph) at the position.
 - Parks: Savant's 3-year park factors by batter side, used to neutralize
   each player's record for the parks he played in (the sim's own parks are
@@ -17,14 +20,21 @@ from __future__ import annotations
 
 import pandas as pd
 
+from npl_sim.engine import fielding as glove
+
 FIELDERS = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-FIELD_REGRESSION = 1500  # balls in play
-FRAMING_REGRESSION = 3000
-SEASON_WEIGHTS = (5.0, 4.0)
-OTHER_POSITION_CREDIT = 0.5  # share of his primary rating at other experienced spots
+SEASONS_BACK = 3  # seasons before this one in the averages
+INNINGS_PER_SEASON = 1350.0  # 150 games
+BIP_PER_INNING = 25 / 9  # balls in play (no homers) per inning
+BIP_PER_SEASON = INNINGS_PER_SEASON * BIP_PER_INNING
+RANGE_REGRESSION = 700.0  # innings of league-average fielding added to his record
+FRAMING_REGRESSION = 1500.0  # balls in play caught
+OAA_RUNS = 0.85  # runs per out above average, for a FanGraphs OAA column in outs
+METRICS = ("drs", "uzr")  # FanGraphs fielding columns, in runs
 POP_AVERAGE, POP_PER_ARM = 1.95, 0.08  # seconds to second base; one arm unit
 OF_ARM_AVERAGE, OF_ARM_PER_UNIT = 86.0, 4.0  # mph
 ARM_RANGE = 2.0
+RANGE_POSITIONS = ("1B", "2B", "3B", "SS", "LF", "CF", "RF")  # catchers: framing and arm
 
 # MLB team abbreviation (Statcast's home_team) -> MLB team id (Savant's main_team_id).
 TEAM_IDS = {
@@ -50,55 +60,75 @@ def bip_on_field(pitches: pd.DataFrame) -> pd.DataFrame:
     return long.groupby(["mlbam_id", "position"]).size().rename("bip").reset_index()
 
 
-def range_ratings(seasons: list[tuple[int, pd.DataFrame | None, pd.DataFrame]]) -> dict:
-    """{id: (position, runs per 600 BIP)} at each player's primary position.
-    `seasons` is [(seasons back, oaa board or None, bip_on_field)], 0 = this season."""
-    runs: dict[tuple[int, str], float] = {}
-    bip: dict[tuple[int, str], float] = {}
-    primary: dict[int, str] = {}
-    for back, board, field in sorted(seasons, key=lambda s: s[0], reverse=True):
-        if board is None or back >= len(SEASON_WEIGHTS):
+def defense_ratings(seasons: list[tuple]) -> dict[str, dict[str, float]]:
+    """{id: {position: runs per 150 games}}. `seasons` is [(seasons back,
+    FanGraphs fielding board or None, Statcast OAA board or None, bip_on_field
+    or None)], 0 = this season to date; seasons more than SEASONS_BACK back are
+    ignored. Each season counts by the innings he played there."""
+    runs: dict[tuple[str, str], float] = {}
+    innings: dict[tuple[str, str], float] = {}
+    for back, fg, oaa, field in seasons:
+        if back > SEASONS_BACK:
             continue
-        w = SEASON_WEIGHTS[back]
-        seen = {(int(r.mlbam_id), r.position): r.bip for r in field.itertuples()}
-        for r in board.itertuples():
-            pos = str(getattr(r, "primary_pos_formatted", "") or "")
-            frp = _num(getattr(r, "fielding_runs_prevented", None))
-            if pd.isna(r.mlbam_id) or pos not in FIELDERS.values() or frp is None:
-                continue
-            key = (int(r.mlbam_id), pos)
-            n = seen.get(key, 0)
-            if n == 0:
-                continue
-            runs[key] = runs.get(key, 0.0) + w * frp
-            bip[key] = bip.get(key, 0.0) + w * n
-            primary[key[0]] = pos  # this season's primary wins (seasons run oldest first)
-    out = {}
-    for pid, pos in primary.items():
-        n = bip.get((pid, pos), 0.0)
-        if n:
-            rate = runs[(pid, pos)] * 600 / n
-            out[str(pid)] = (pos, rate * n / (n + FIELD_REGRESSION * SEASON_WEIGHTS[0]))
+        found: dict[tuple[str, str], dict] = {}  # (id, pos) -> {metric: runs, "inn": ...}
+        if fg is not None and not fg.empty:
+            cols = {str(c).lower(): c for c in fg.columns}
+            pos_col, inn_col = cols.get("pos"), cols.get("inn")
+            if pos_col is not None and inn_col is not None and "mlbam_id" in fg:
+                for _, r in fg.iterrows():
+                    pos, inn = str(r[pos_col]), _innings(r[inn_col])
+                    if pd.isna(r["mlbam_id"]) or pos not in RANGE_POSITIONS or not inn:
+                        continue
+                    rec = found.setdefault((str(int(r["mlbam_id"])), pos), {})
+                    rec["inn"] = inn
+                    for m in METRICS:
+                        v = _num(r[cols[m]]) if m in cols else None
+                        if v is not None:
+                            rec[m] = v
+                    if "oaa" in cols and _num(r[cols["oaa"]]) is not None:
+                        rec["oaa"] = OAA_RUNS * _num(r[cols["oaa"]])
+        if oaa is not None and not oaa.empty:
+            seen = {}
+            if field is not None:
+                seen = {(str(int(r.mlbam_id)), r.position): r.bip for r in field.itertuples()}
+            for r in oaa.itertuples():
+                pos = str(getattr(r, "primary_pos_formatted", "") or "")
+                frp = _num(getattr(r, "fielding_runs_prevented", None))
+                if pd.isna(r.mlbam_id) or pos not in RANGE_POSITIONS or frp is None:
+                    continue
+                key = (str(int(r.mlbam_id)), pos)
+                rec = found.setdefault(key, {})
+                rec["oaa"] = frp  # Statcast's own runs beat FanGraphs' copy
+                if "inn" not in rec and seen.get(key):
+                    rec["inn"] = seen[key] / BIP_PER_INNING
+        for key, rec in found.items():
+            values = [rec[m] for m in (*METRICS, "oaa") if m in rec]
+            if values and rec.get("inn"):
+                runs[key] = runs.get(key, 0.0) + sum(values) / len(values)
+                innings[key] = innings.get(key, 0.0) + rec["inn"]
+    out: dict[str, dict[str, float]] = {}
+    for (pid, pos), inn in innings.items():
+        per_season = runs[(pid, pos)] * INNINGS_PER_SEASON / inn
+        out.setdefault(pid, {})[pos] = per_season * inn / (inn + RANGE_REGRESSION)
     return out
 
 
 def framing_ratings(seasons: list[tuple[int, pd.DataFrame | None, pd.DataFrame]]) -> dict:
-    """{id: framing runs per 600 BIP caught}, regressed."""
+    """{id: framing runs per 150 games caught}, regressed."""
     runs: dict[int, float] = {}
     bip: dict[int, float] = {}
     for back, board, field in seasons:
-        if board is None or back >= len(SEASON_WEIGHTS) or "rv_tot" not in board:
+        if board is None or back > SEASONS_BACK or "rv_tot" not in board:
             continue
-        w = SEASON_WEIGHTS[back]
         caught = field[field["position"] == "C"].set_index("mlbam_id")["bip"]
         for pid, rv in zip(board["mlbam_id"], board["rv_tot"], strict=True):
             rv = _num(rv)
             if pd.isna(pid) or rv is None or int(pid) not in caught.index:
                 continue
-            runs[int(pid)] = runs.get(int(pid), 0.0) + w * rv
-            bip[int(pid)] = bip.get(int(pid), 0.0) + w * caught[int(pid)]
+            runs[int(pid)] = runs.get(int(pid), 0.0) + rv
+            bip[int(pid)] = bip.get(int(pid), 0.0) + caught[int(pid)]
     return {
-        str(p): runs[p] * 600 / n * n / (n + FRAMING_REGRESSION * SEASON_WEIGHTS[0])
+        str(p): runs[p] * BIP_PER_SEASON / n * n / (n + FRAMING_REGRESSION)
         for p, n in bip.items()
         if n
     }
@@ -121,15 +151,23 @@ def arms(arm_board: pd.DataFrame | None, pop_board: pd.DataFrame | None) -> dict
     return out
 
 
-def positions(eligible: dict[str, float], rating: tuple[str, float] | None, framing=None):
-    """A hitter's `positions` for the engine: his primary position's rating,
-    half of it at his other experienced spots, and framing at catcher."""
-    out = dict(eligible)
-    if rating is not None:
-        pos, runs = rating
-        for p in out:
-            out[p] = runs * OTHER_POSITION_CREDIT
-        out[pos] = runs
+def positions(eligible: dict[str, float], ratings=None, framing=None) -> dict[str, float]:
+    """A hitter's `positions` for the engine: at each eligible position his
+    rating there when he has one; else the best free move from a position he
+    has a rating at (outfield to outfield, short to second or third), if that
+    beats average; else average. Framing at catcher. `ratings` is
+    {position: runs per 150 games} (defense_ratings) or an older
+    (position, runs) pair."""
+    if isinstance(ratings, tuple):
+        ratings = {ratings[0]: ratings[1]}
+    ratings = ratings or {}
+    out = {}
+    for pos in eligible or ratings:
+        if pos in ratings:
+            out[pos] = ratings[pos]
+        else:
+            moves = [glove.move(r, frm, pos) for frm, r in ratings.items() if glove.free(frm, pos)]
+            out[pos] = max([0.0, *moves])
     if framing is not None:
         out["C"] = framing
     return out
@@ -159,6 +197,15 @@ def park_factors(board: pd.DataFrame | None) -> dict[tuple[str, str], dict[str, 
         for a in abbr.get(int(tid), []):
             out[(a, side)] = factors
     return out
+
+
+def _innings(v) -> float | None:
+    """FanGraphs innings, where .1 and .2 are thirds."""
+    f = _num(v)
+    if f is None:
+        return None
+    whole = int(f)
+    return whole + round((f - whole) * 10) / 3
 
 
 def _clip(x: float) -> float:
