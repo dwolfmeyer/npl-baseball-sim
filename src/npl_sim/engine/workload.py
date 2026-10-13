@@ -76,6 +76,10 @@ class MlbWeek:
     pa: dict[str, int] = field(default_factory=dict)
     starts: dict[str, int] = field(default_factory=dict)
     relief_outs: dict[str, int] = field(default_factory=dict)
+    # Outs a pitcher threw as an MLB starter. They count toward his budget only
+    # on a team that doesn't start him: a manager who keeps an MLB starter in
+    # the pen gets those innings from him in relief.
+    start_outs: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -402,6 +406,11 @@ def play_week(
     `audit` keeps each game's per-PA inputs (npl_sim/audit.py) as "audit"."""
     carry = carry or {}
     states = {name: WeekState.open(mlb, carry.get(name), t.players) for name, t in teams.items()}
+    for name, t in teams.items():
+        in_rotation = {p.id for p in t.rotation}
+        for pid in t.players & mlb.start_outs.keys() - in_rotation:
+            outs = math.ceil(mlb.start_outs[pid] * RELIEF_SLACK)
+            states[name].outs_left[pid] = states[name].outs_left.get(pid, 0) + outs
     played = []
     for n, (day, away, home, *rest) in enumerate(sorted(games, key=lambda g: g[0])):
         series = rest[0] if rest else None

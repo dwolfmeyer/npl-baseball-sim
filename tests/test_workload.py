@@ -165,6 +165,18 @@ def test_a_hitter_with_any_pa_left_starts():
     assert lineup[1][0] != "SS1"
 
 
+def test_an_mlb_starter_in_the_pen_pitches_his_start_innings_in_relief():
+    # RP1 has no relief outs, but started in MLB: his 18 outs are his budget here.
+    usage = week(relief_outs={f"Home-RP{i}": 0 for i in range(1, 9)})
+    none = play_week(TEAMS, GAMES[:3], usage, DEFAULT_ENV, seed=2)
+    assert relief_lines(none)[0]["Home-RP1"] == 0
+    usage = MlbWeek(**{**vars(usage), "start_outs": {"Home-RP1": 18, "Home-SP1": 18}})
+    result = play_week(TEAMS, GAMES[:3], usage, DEFAULT_ENV, seed=2)
+    outs = relief_lines(result)[0]["Home-RP1"]
+    assert 0 < outs <= 18 * RELIEF_SLACK + 3
+    assert result.games[0]["moves"]["Home"].starter != "Home-RP1"  # still not a starter
+
+
 def test_mlb_week_from_clean_tables():
     batting = pd.DataFrame({"mlbam_id": [1, 1, 2], "pa": [4, 5, 0]})
     pitching = pd.DataFrame({"mlbam_id": [9, 9, 8], "gs": [1, 0, 0], "outs": [18, 3, 4]})
@@ -172,6 +184,7 @@ def test_mlb_week_from_clean_tables():
     assert usage.pa == {"1": 9}
     assert usage.starts == {"9": 1}
     assert usage.relief_outs == {"9": 3, "8": 4}
+    assert usage.start_outs == {"9": 18}
 
 
 def test_standins_hit_at_scoresheet_penalty_levels():

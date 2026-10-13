@@ -164,7 +164,7 @@ def typical_mlb_week(
         whole = int(per_week)
         return whole + (rng.random() < per_week - whole)
 
-    pa, starts, relief = {}, {}, {}
+    pa, starts, relief, start_outs = {}, {}, {}, {}
     for roster in rosters.values():
         for p in roster:
             rec = elig.players.get(p.mlb_id)
@@ -177,6 +177,7 @@ def typical_mlb_week(
                 starts[pid] = draw(gs / SEASON_WEEKS)
                 relief_share = (g - gs) / g if gs else 1.0
                 relief[pid] = draw(outs * relief_share / SEASON_WEEKS)
+                start_outs[pid] = draw(outs * (1 - relief_share) / SEASON_WEEKS)
             games = sum(rec.games.get(season, {}).values())
             if games and not lineup.is_pitcher(p):
                 pa[pid] = round(draw(min(7.0, games / SEASON_WEEKS)) * PA_PER_GAME)
@@ -184,6 +185,7 @@ def typical_mlb_week(
         pa={k: v for k, v in pa.items() if v},
         starts={k: v for k, v in starts.items() if v},
         relief_outs={k: v for k, v in relief.items() if v},
+        start_outs={k: v for k, v in start_outs.items() if v},
     )
 
 
@@ -235,4 +237,5 @@ def default_week(
         pa=merge(typical.pa, sample.pa),
         starts=merge(typical.starts, sample.starts),
         relief_outs=merge(typical.relief_outs, sample.relief_outs),
+        start_outs=typical.start_outs,
     )
