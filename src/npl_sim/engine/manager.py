@@ -54,6 +54,28 @@ NO_PINCH_HITTING = PinchHitting(enabled=False)
 
 
 @dataclass(frozen=True)
+class Bunting:
+    """When the owner has a hitter sacrifice-bunt.
+
+    Only with nobody out, a runner on first or second and third base open,
+    from `from_inning` on, with the batting team between `max_deficit` runs
+    behind and `max_lead` runs ahead, and only for a weak bat: his expected
+    run value per PA against this pitcher at least `min_shortfall` below an
+    average hitter's. `rate` is the share of those spots he bunts in.
+    """
+
+    enabled: bool = True
+    from_inning: int = 7
+    max_deficit: int = 1
+    max_lead: int = 0
+    min_shortfall: float = 0.03
+    rate: float = 0.5
+
+
+NO_BUNTING = Bunting(enabled=False)
+
+
+@dataclass(frozen=True)
 class ManagerStyle:
     name: str
     label: str

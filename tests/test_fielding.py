@@ -49,7 +49,7 @@ def test_out_of_position_shows_in_the_box_and_costs_runs():
     runs = {
         swap: sum(
             simulate_game(average_team("Away"), team(swap), DEFAULT_ENV, s)[-1]["away"]
-            for s in range(400)
+            for s in range(2000)  # the cost is ~0.1 runs a game, so it takes a big sample
         )
         for swap in (False, True)
     }

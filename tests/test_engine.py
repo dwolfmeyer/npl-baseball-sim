@@ -98,8 +98,10 @@ def test_walkoff_ends_the_game_at_once(season):
             and len(final["line"]["home"]) >= 9
             and (len(final["line"]["home"]) == len(final["line"]["away"]))
         ):
-            last = [e for e in g if e["type"] == "pa"][-1]
+            # The last play (a PA, or a wild pitch, passed ball or balk) scores.
+            last = [e for e in g if "scored" in e][-1]
             assert last["half"] == "bottom" and last["scored"]
+            assert g[g.index(last) + 1]["type"] == "half_end"
 
 
 def test_park_hr_factor_is_applied_once():
@@ -152,7 +154,8 @@ def test_better_hitters_score_more():
         for h, pos in strong.lineup
     ]
     weak = average_team("Weak")
-    games = [simulate_game(weak, strong, DEFAULT_ENV, s) for s in range(300)]
+    # The true gap is about 22% more runs; 1000 games keeps noise well inside 15%.
+    games = [simulate_game(weak, strong, DEFAULT_ENV, s) for s in range(1000)]
 
     def per_inning(team):
         return sum(sum(g[-1]["line"][team]) for g in games) / sum(

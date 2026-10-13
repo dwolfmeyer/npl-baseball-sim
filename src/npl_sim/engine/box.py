@@ -15,8 +15,8 @@ from npl_sim.engine.detail import POSITION_NUMBER
 from npl_sim.engine.names import Roster, ordinal
 
 HITS = ("1B", "2B", "3B", "HR")
-NOT_AB = ("BB", "HBP", "SF")
-GROUND_OUTS = ("GO", "DP", "FC")
+NOT_AB = ("BB", "HBP", "SF", "SH")
+GROUND_OUTS = ("GO", "DP", "FC", "SH")
 AIR_OUTS = ("FO", "LO", "PO", "SF")
 TOTAL_BASES = {"1B": 1, "2B": 2, "3B": 3, "HR": 4}
 
@@ -40,6 +40,7 @@ class BattingLine:
     sb: int = 0
     cs: int = 0
     sf: int = 0
+    sh: int = 0
     lob: int = 0
 
 
@@ -146,13 +147,16 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
     risp = {s: [0, 0] for s in sides}  # hits, at bats
 
     notes = {
-        s: {k: [] for k in ("2B", "3B", "HR", "SF", "GIDP", "SB", "CS", "E", "DP")} for s in sides
+        s: {k: [] for k in ("2B", "3B", "HR", "SF", "SAC", "GIDP", "SB", "CS", "E", "DP", "PB")}
+        for s in sides
     }
     tb = {s: defaultdict(int) for s in sides}
     rbi = {s: defaultdict(int) for s in sides}
     two_out_rbi = {s: defaultdict(int) for s in sides}
     risp_left = {s: defaultdict(int) for s in sides}
     hbp_notes: list[tuple[str, str]] = []
+    wp_notes: list[tuple[str, str]] = []
+    balk_notes: list[tuple[str, str]] = []
 
     current = {s: roster.teams[s].starter for s in sides}
     score = dict.fromkeys(sides, 0)
@@ -242,6 +246,9 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
             b.sf += res == "SF"
             if res == "SF":
                 notes[offense]["SF"].append((batter, ""))
+            b.sh += res == "SH"
+            if res == "SH":
+                notes[offense]["SAC"].append((batter, ""))
             if res == "DP":
                 notes[offense]["GIDP"].append((batter, ""))
                 notes[defense]["DP"].append(("", _dp_chain(roster, defense, e)))
@@ -279,6 +286,16 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
                 pit(defense, e["pitcher"]).outs += 1
                 stints[defense][-1].outs += 1
                 notes[offense]["CS"].append((line.name, f"{base} by {battery}"))
+        elif e["type"] in ("wild_pitch", "passed_ball", "balk"):
+            pitcher = roster.short[e["pitcher"]]
+            if e["type"] == "wild_pitch":
+                wp_notes.append((pitcher, ""))
+            elif e["type"] == "balk":
+                balk_notes.append((pitcher, ""))
+            else:
+                catcher = roster.fielder_id(defense, "C", e["pitcher"])
+                notes[defense]["PB"].append((roster.short[catcher] if catcher else "C", ""))
+            add_runs(offense, e["scored"])
         elif e["type"] in ("defensive_sub", "pinch_hitter"):
             side = roster.side_of(e["team"])
             roster.teams[side].substitute(e)
@@ -319,6 +336,7 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
             ("2-out RBI", _counts(two_out_rbi[s])),
             ("Runners left in scoring position, 2 out", _counts(risp_left[s])),
             ("SF", _tally(n["SF"])),
+            ("SAC", _tally(n["SAC"])),
             ("GIDP", _tally(n["GIDP"])),
             ("Team RISP", f"{risp[s][0]}-for-{risp[s][1]}."),
             ("Team LOB", f"{lob[s]}."),
@@ -333,6 +351,7 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
         fielding = [
             ("Out of position", ", ".join(misplaced) + "."),
             ("E", _tally(n["E"])),
+            ("PB", _tally(n["PB"])),
             ("DP", f"{len(dp)} ({', '.join(x for _, x in dp)})." if dp else "."),
         ]
         team_notes[s] = [
@@ -347,6 +366,8 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
 
     every = [p for s in sides for p in pitching[s].values()]
     game_notes = [
+        ("WP", _tally(wp_notes)),
+        ("Balk", _tally(balk_notes)),
         ("HBP", _tally(hbp_notes)),
         ("Pitches-strikes", ", ".join(f"{p.name} {p.pitches}-{p.strikes}" for p in every) + "."),
         (

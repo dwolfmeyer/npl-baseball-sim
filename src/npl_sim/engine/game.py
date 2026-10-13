@@ -4,6 +4,14 @@ Milestone 5 scope: full PA model, baserunning, steals, double plays, sac
 flies, errors, extra innings with the automatic runner, walk-offs, and a
 starter hooks by pitch count, times through the order, runs allowed and
 leverage (hooks.py), and relievers by the owner's bullpen designations.
+
+MLB playing rules it follows: the extra-inning runner on second; the
+three-batter minimum (a pitcher faces three batters or finishes the half
+inning before he can be pulled); a walk-off ends the game when the winning
+run scores, the batter credited with only as many bases as that runner
+advanced (all runs count on a home run); ground-rule doubles (every runner
+gets exactly two bases); sacrifice flies and sacrifice bunts (not at bats);
+wild pitches, passed balls (runs unearned) and balks.
 """
 
 from __future__ import annotations
@@ -15,11 +23,28 @@ from npl_sim.engine import bullpen as pen
 from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
-from npl_sim.engine.manager import PinchHitting, run_value
+from npl_sim.engine.manager import Bunting, PinchHitting, run_value
 from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
 
 # Mean pitches per PA by outcome.
-PITCHES = {"K": 4.8, "BB": 5.7, "HBP": 3.6, "HR": 3.5, "BIP": 3.4}
+PITCHES = {"K": 4.8, "BB": 5.7, "HBP": 3.6, "HR": 3.5, "BIP": 3.4, "BUNT": 2.6}
+# Share of doubles in the air that bounce out of play (ground-rule doubles).
+GROUND_RULE_DOUBLE = 0.07
+# Chance of each before a PA with runners on, tuned to recent MLB (per team
+# game about 0.33 wild pitches, 0.05 passed balls, 0.03 balks); a wild
+# pitcher's chance scales with his walk rate.
+WILD_PITCH, PASSED_BALL, BALK = 0.019, 0.003, 0.0016
+# How a sacrifice-bunt attempt turns out: sacrifice, bunt single, lead runner
+# forced, popped up, double play, struck out on a foul bunt.
+BUNT_ODDS = {
+    "BUNT:SH": 0.64,
+    "BUNT:1B": 0.07,
+    "BUNT:FC": 0.13,
+    "BUNT:PO": 0.06,
+    "BUNT:DP": 0.02,
+    "K": 0.08,
+}
+HIT_BASES = {"1B": 1, "2B": 2, "3B": 3}
 
 
 @dataclass(frozen=True)
@@ -116,6 +141,7 @@ class TeamCard:
     # Bench bats available to pinch-hit, and the owner's rules for it (manager.py).
     bench: tuple[Hitter, ...] = ()
     pinch: PinchHitting = field(default_factory=PinchHitting)
+    bunt: Bunting = field(default_factory=Bunting)
 
     @property
     def short(self) -> str:
@@ -176,6 +202,8 @@ class GameSim:
         self.bases: list[Runner | None] = [None, None, None]
         self.line: dict[str, list[int]] = {"away": [], "home": []}
         self.alignment = "normal"  # the fielding team's alignment for the current PA
+        self._homer = False  # every run counts on a walk-off home run
+        self._ground_rule = False  # the last double bounced out of play
 
     # -- helpers -------------------------------------------------------------
     def _log(self, kind: str, **data) -> None:
@@ -188,6 +216,8 @@ class GameSim:
         return self.sides["home" if self.half == "top" else "away"]
 
     def _score(self, runner: Runner, scored: list) -> None:
+        if self._walkoff() and not self._homer:
+            return  # the game ended when the winning run scored
         self._batting().runs += 1
         charged = self._fielding().charged
         charged[runner.pitcher_id] = charged.get(runner.pitcher_id, 0) + 1
@@ -245,6 +275,8 @@ class GameSim:
     def _should_pull(self, side: _Side, mid_inning: bool) -> str | None:
         """Why the current pitcher comes out before the next PA, or None."""
         p, card = side.pitcher, side.card
+        if mid_inning and side.batters_faced < 3:
+            return None  # three-batter minimum: he faces three or finishes the inning
         if side.pitches >= p.pitch_limit + (15 if mid_inning else 0):
             return "pitch_count"
         if p.id in card.outs_limit and side.pitcher_outs >= card.outs_limit[p.id]:
@@ -400,9 +432,12 @@ class GameSim:
             self._maybe_steal()
             if self.outs >= 3:
                 break
+            self._maybe_wild_pitch()
+            if self._walkoff():
+                break
             self._maybe_pinch_hit()
             self._plate_appearance()
-            if self.outs < 3:
+            if self.outs < 3 and not self._walkoff():
                 self._maybe_change_pitcher(mid_inning=True)
         self._log("half_end", left_on_base=sum(r is not None for r in self.bases))
         self.line["away" if self.half == "top" else "home"].append(side.runs - start_runs)
@@ -560,6 +595,79 @@ class GameSim:
             bases_after=self._bases(),
         )
 
+    def _maybe_wild_pitch(self) -> None:
+        """A wild pitch, passed ball or balk: every runner moves up a base."""
+        if not any(self.bases):
+            return
+        defense = self._fielding()
+        p = defense.pitcher
+        walks = p.rates_vs("R").bb / self.env.split("R", p.throws).bb
+        wild = WILD_PITCH * min(max(walks, 0.5), 2.0)
+        r = self.rng.random()
+        if r < wild:
+            kind = "wild_pitch"
+        elif r < wild + PASSED_BALL:
+            kind = "passed_ball"
+        elif r < wild + PASSED_BALL + BALK:
+            kind = "balk"
+        else:
+            return
+        b, scored = self.bases, []
+        before = self._bases()
+        moves = [
+            {"runner": r.hitter.id, "start": base, "end": end}
+            for r, base, end in zip(b, ("1B", "2B", "3B"), ("2B", "3B", "score"), strict=True)
+            if r is not None
+        ]
+        if b[2] is not None:
+            if kind == "passed_ball":
+                b[2].earned = False  # a run that scores on a passed ball is unearned
+            self._score(b[2], scored)
+        self.bases = [None, b[0], b[1]]
+        self._log(
+            kind,
+            pitcher=p.id,
+            scored=scored,
+            runners=moves,
+            bases_before=before,
+            bases_after=self._bases(),
+            outs_after=self.outs,
+        )
+
+    def _bunt_odds(self, hitter: Hitter, pitcher: Pitcher, side: str, probs: dict, fatigue: float):
+        """Outcome odds of a sacrifice bunt when the owner's rules call for one
+        here, else None (swing away)."""
+        offense, defense = self._batting(), self._fielding()
+        rule, b = offense.card.bunt, self.bases
+        if not rule.enabled or self.outs or b[2] or not (b[0] or b[1]):
+            return None
+        if self.inning < rule.from_inning:
+            return None
+        if not -rule.max_deficit <= offense.runs - defense.runs <= rule.max_lead:
+            return None
+        average = pa_probabilities(
+            self.env.split(side, pitcher.throws),
+            pitcher.rates_vs(side),
+            self.env,
+            side,
+            pitcher.throws,
+            self.park,
+            defense.defense,
+            fatigue,
+            self.alignment,
+        )
+        if run_value(average) - run_value(probs) < rule.min_shortfall:
+            return None
+        if self.rng.random() >= rule.rate:
+            return None
+        odds = dict(BUNT_ODDS)
+        hit = min(max(0.07 + 0.02 * hitter.speed, 0.02), 0.15)
+        odds["BUNT:SH"] += odds["BUNT:1B"] - hit
+        odds["BUNT:1B"] = hit
+        if b[1]:  # no double play to turn with the lead runner going to third
+            odds["BUNT:FC"] += odds.pop("BUNT:DP")
+        return odds
+
     def _plate_appearance(self) -> None:
         offense, defense = self._batting(), self._fielding()
         hitter, pos = offense.lineup[offense.slot]
@@ -586,6 +694,9 @@ class GameSim:
             fatigue,
             self.alignment,
         )
+        bunt = self._bunt_odds(hitter, pitcher, side, probs, fatigue)
+        if bunt is not None:
+            probs = bunt
         if self.audit is not None:
             self.audit.append(
                 {
@@ -603,7 +714,7 @@ class GameSim:
             )
         result = self.rng.choices(list(probs), weights=list(probs.values()))[0]
         kind = result.split(":")[0] if ":" in result else result
-        mean = PITCHES["BIP" if ":" in result else kind]
+        mean = PITCHES["BUNT" if bunt else "BIP" if ":" in result else kind]
         pitches = max(1, round(mean + self.rng.uniform(-1.5, 1.5)))
         defense.pitches += pitches
         defense.batters_faced += 1
@@ -611,15 +722,24 @@ class GameSim:
         outs_before = self.outs
         before = list(self.bases)
         scored: list[dict] = []
+        self._homer = self._ground_rule = False
         outcome = self._resolve(result, hitter, pitcher, scored)
+        if outcome in HIT_BASES and scored and self._walkoff():
+            outcome = self._walkoff_hit(outcome, hitter, before, scored)
         rbi = len(scored) if outcome not in ("E", "DP") else 0
         defense.pitcher_outs += self.outs - outs_before
         bip = kind if ":" in result else None
+        if bunt is not None and bip:
+            bip = "PU" if outcome == "PO" else "GB"
         drng = self.detail_rng
         balls, strikes, strikes_thrown = detail.count(drng, "BIP" if bip else kind, pitches)
         extra = {"alignment": self.alignment} if self.alignment != "normal" else {}
+        if bunt is not None:
+            extra["bunt"] = True
+        if self._ground_rule and outcome == "2B":
+            extra["ground_rule"] = True
         if outcome == "K":
-            extra["k_type"] = detail.strikeout_kind(drng)
+            extra["k_type"] = "bunt" if bunt is not None else detail.strikeout_kind(drng)
         elif outcome == "HR":
             extra["direction"] = detail.hr_direction(drng, side)
             extra["batted_ball"] = detail.hr_ball(drng)
@@ -631,7 +751,11 @@ class GameSim:
             position=pos,
             result=outcome,
             bip=bip,
-            fielder=detail.fielder(drng, outcome, bip, side),
+            fielder=(
+                detail.bunt_fielder(drng, outcome)
+                if bunt is not None
+                else detail.fielder(drng, outcome, bip, side)
+            ),
             pitches=pitches,
             count=[balls, strikes],
             strikes=strikes_thrown,
@@ -661,6 +785,20 @@ class GameSim:
             moves.append({"runner": r.id, "start": start, "end": end})
         return moves
 
+    def _walkoff_hit(self, outcome: str, hitter: Hitter, before: list, scored: list) -> str:
+        """A game-ending hit counts for only as many bases as the winning run
+        advanced (rule 9.06(f)): a double that scores the winner from third is
+        a single."""
+        winner = scored[-1]["runner"]
+        start = next(i for i, r in enumerate(before) if r is not None and r.hitter.id == winner)
+        bases = min(HIT_BASES[outcome], 3 - start)
+        if bases == HIT_BASES[outcome]:
+            return outcome
+        at = next(i for i, r in enumerate(self.bases) if r is not None and r.hitter.id == hitter.id)
+        runner, self.bases[at] = self.bases[at], None
+        self.bases[bases - 1] = runner
+        return {1: "1B", 2: "2B", 3: "3B"}[bases]
+
     # -- baserunning ---------------------------------------------------------
     def _force(self, batter: Runner, scored: list) -> None:
         """Walk/HBP: batter to first, forced runners move up one."""
@@ -684,6 +822,7 @@ class GameSim:
             self._force(batter, scored)
             return result
         if result == "HR":
+            self._homer = True
             for r in b:
                 if r is not None:
                     self._score(r, scored)
@@ -692,6 +831,8 @@ class GameSim:
             return "HR"
 
         bip, res = result.split(":")
+        if bip == "BUNT":
+            return self._bunt(res, batter)
         if res == "1B":
             if b[2]:
                 self._score(b[2], scored)
@@ -712,11 +853,15 @@ class GameSim:
             self.bases = [batter, second, third]
             return "1B"
         if res == "2B":
+            # A ground-rule double gives every runner exactly two bases.
+            self._ground_rule = bip in ("LD", "FB") and rng.random() < GROUND_RULE_DOUBLE
             for r in (b[2], b[1]):
                 if r:
                     self._score(r, scored)
             third = None
-            if b[0]:
+            if b[0] and self._ground_rule:
+                third = b[0]
+            elif b[0]:
                 p = 0.42 + 0.10 * b[0].hitter.speed - 0.06 * arm + (0.2 if self.outs == 2 else 0)
                 if rng.random() < p:
                     self._score(b[0], scored)
@@ -749,6 +894,27 @@ class GameSim:
             if b[1] and not b[2] and rng.random() < 0.22:
                 b[2], b[1] = b[1], None
         return {"FB": "FO", "LD": "LO", "PU": "PO"}[bip]
+
+    def _bunt(self, res: str, batter: Runner) -> str:
+        """A sacrifice-bunt attempt with nobody out, a runner on first or
+        second and third base open (see _bunt_odds)."""
+        b = self.bases
+        if res == "SH":  # batter out at first, the runners move up
+            self.outs += 1
+            b[2], b[1], b[0] = b[1], b[0], None
+        elif res == "1B":
+            b[2], b[1], b[0] = b[1], b[0], batter
+        elif res == "FC":  # the lead runner is forced out, the batter safe at first
+            self.outs += 1
+            if b[1]:
+                b[1] = b[0]
+            b[0] = batter
+        elif res == "DP":  # only with a runner on first alone
+            self.outs += 2
+            b[0] = None
+        else:  # popped up: runners hold
+            self.outs += 1
+        return res
 
     def _ground_out(self, batter: Runner, scored: list) -> str:
         rng, b = self.rng, self.bases

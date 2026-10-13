@@ -175,7 +175,13 @@ def summarize(result: WeekResult, week: Week, season: SeasonResult) -> None:
                 t["PA"] += 1
                 t[e["result"]] += 1
                 t["pitches"] += e["pitches"]
-            elif e["type"] in ("stolen_base", "caught_stealing"):
+            elif e["type"] in (
+                "stolen_base",
+                "caught_stealing",
+                "wild_pitch",
+                "passed_ball",
+                "balk",
+            ):
                 t[e["type"]] += 1
 
 

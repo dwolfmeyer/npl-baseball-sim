@@ -15,7 +15,9 @@ kinds of records (the "record" key):
   changes (why, the outgoing pitcher's pitches, batters faced and runs,
   leverage, the bullpen situation tier, the reliever's role and who else was
   available), pinch hitters (leverage, expected run gain), defensive subs,
-  steals and caught stealing, and the extra-inning runner.
+  steals and caught stealing, the extra-inning runner, and wild pitches,
+  passed balls and balks. Sacrifice-bunt PAs carry `"bunt": true` in
+  their outcome and the bunt's odds in place of the swing-away odds.
 - player: each batter and pitcher who took part, with the card rates the
   engine used (vs LHP/RHP or vs LHB/RHB), the talent blend's indexes and
   layers (baseline, process, results), and real stat lines by season and
@@ -52,6 +54,9 @@ DECISIONS = (
     "stolen_base",
     "caught_stealing",
     "auto_runner",
+    "wild_pitch",
+    "passed_ball",
+    "balk",
 )
 
 
@@ -138,6 +143,7 @@ def game_records(game: dict, number: int, seed: int | None = None, talent=None) 
         offense = "away" if e.get("half") == "top" else "home"
         if e["type"] in DECISIONS:
             records.append(_decision(e, number, score, by_event.get(at, {}), names, setup))
+            score[offense] += len(e.get("scored", []))
             continue
         if e["type"] != "pa":
             continue
@@ -191,6 +197,8 @@ def game_records(game: dict, number: int, seed: int | None = None, talent=None) 
                     "fielder": e.get("fielder"),
                     "direction": e.get("direction"),
                     "k_type": e.get("k_type"),
+                    "bunt": bool(e.get("bunt")),
+                    "ground_rule": bool(e.get("ground_rule")),
                     "outs": e["outs"],
                     "runs": len(e["scored"]),
                     "rbi": e["rbi"],

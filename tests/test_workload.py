@@ -126,16 +126,13 @@ def test_standins_hit_at_scoresheet_penalty_levels():
         lineup[i] = (standin_hitter(f"AAA-{pos}", pos), pos)
     away = replace(away, lineup=lineup)
     ab, hits = Counter(), Counter()
-    for seed in range(400):
+    for seed in range(1500):  # enough at bats that noise stays inside the bands
         for e in simulate_game(away, average_team("H"), DEFAULT_ENV, seed):
             if (
                 e["type"] == "pa"
                 and e["batter"].startswith("AAA")
-                and e["result"]
-                not in (
-                    "BB",
-                    "HBP",
-                )
+                and e["result"] not in ("BB", "HBP", "SF")
+                and not e.get("bunt")  # weak stand-ins sometimes sacrifice
             ):
                 ab[e["batter"]] += 1
                 hits[e["batter"]] += e["result"] in ("1B", "2B", "3B", "HR")

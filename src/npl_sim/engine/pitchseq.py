@@ -88,7 +88,9 @@ def sequence(
         x, z = _location(rng, call, batter_side)
         if call == "Ball":
             balls += 1
-        elif call in ("Called Strike", "Swinging Strike") or (call == "Foul" and strikes < 2):
+        elif call in ("Called Strike", "Swinging Strike", "Foul Bunt") or (
+            call == "Foul" and strikes < 2
+        ):
             strikes += 1
         out.append(Pitch(n, call, min(balls, 4), min(strikes, 3), code, mph, x, z))
     return out
@@ -97,7 +99,7 @@ def sequence(
 def _calls(rng, result, pitches, count, k_type, runs) -> list[str]:
     balls, strikes = count
     if result == "K":
-        last = "Swinging Strike" if k_type == "swinging" else "Called Strike"
+        last = {"swinging": "Swinging Strike", "bunt": "Foul Bunt"}.get(k_type, "Called Strike")
         before_b, before_s = balls, 2
     elif result == "BB":
         last, before_b, before_s = "Ball", 3, strikes
