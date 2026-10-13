@@ -15,10 +15,12 @@ def mlb_week(batting: pd.DataFrame, pitching: pd.DataFrame) -> MlbWeek:
     pa = batting.groupby("mlbam_id")["pa"].sum()
     starts = pitching.groupby("mlbam_id")["gs"].sum()
     relief = pitching[pitching["gs"] == 0].groupby("mlbam_id")["outs"].sum()
+    start_outs = pitching[pitching["gs"] > 0].groupby("mlbam_id")["outs"].sum()
     return MlbWeek(
         pa={str(k): int(v) for k, v in pa.items() if v > 0},
         starts={str(k): int(v) for k, v in starts.items() if v > 0},
         relief_outs={str(k): int(v) for k, v in relief.items() if v > 0},
+        start_outs={str(k): int(v) for k, v in start_outs.items() if v > 0},
     )
 
 

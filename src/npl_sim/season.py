@@ -115,6 +115,7 @@ def pace_week(
     pa: dict[str, int] = {}
     starts: dict[str, int] = {}
     relief: dict[str, int] = {}
+    start_outs: dict[str, int] = {}
     for card in cards.values():
         in_order = {pid for order in card.orders.values() for pid, _ in order if pid}
         rotation = {pid for pid in card.rotation if pid}
@@ -134,7 +135,8 @@ def pace_week(
         pa.update(typical.pa)
         starts.update(typical.starts)
         relief.update(typical.relief_outs)
-    return MlbWeek(pa=pa, starts=starts, relief_outs=relief)
+        start_outs = typical.start_outs
+    return MlbWeek(pa=pa, starts=starts, relief_outs=relief, start_outs=start_outs)
 
 
 def week_games(schedule: list[ScheduledSeries], week: Week) -> list[tuple[int, str, str, int]]:
