@@ -30,27 +30,57 @@ def test_bip_on_field_counts_each_position():
     assert got == {(1, "SS"): 30, (1, "2B"): 10, (9, "C"): 40}  # homers aren't chances
 
 
-def test_range_rating_is_per_600_bip_and_regressed():
-    board = pd.DataFrame(
-        {
-            "mlbam_id": [1, 2],
-            "primary_pos_formatted": ["SS", "CF"],
-            "fielding_runs_prevented": [10, "-5"],
-        }  # fmt: skip
+def fg(rows):
+    return pd.DataFrame(rows, columns=["mlbam_id", "Pos", "Inn", "DRS", "UZR"])
+
+
+def test_defense_rating_averages_oaa_drs_and_uzr_over_three_years():
+    # A full-time shortstop, +10 DRS and +6 UZR a year, +8 OAA runs (Statcast).
+    oaa = pd.DataFrame(
+        {"mlbam_id": [1], "primary_pos_formatted": ["SS"], "fielding_runs_prevented": [8]}
     )
-    field = pd.DataFrame({"mlbam_id": [1, 2], "position": ["SS", "CF"], "bip": [3000, 600]})
-    r = tf.range_ratings([(0, board, field)])
-    assert r["1"][0] == "SS" and 0 < r["1"][1] < 2.0  # 2.0 raw, a little regressed
-    assert -5 < r["2"][1] < 0
-    # A full season plus last year's counts for more than this season alone.
-    both = tf.range_ratings([(0, board, field), (1, board, field)])
-    assert both["1"][1] > r["1"][1]
+    full = fg([[1, "SS", "1350.0", 10, 6], [1, "2B", "45.1", 1, 0]])
+    seasons = [(back, full, oaa, None) for back in range(4)]
+    r = tf.defense_ratings(seasons)
+    # (10 + 6 + 8) / 3 = +8 per 150 games, regressed by 700 of 5400 innings.
+    assert r["1"]["SS"] == pytest.approx(8 * 5400 / 6100)
+    assert 0 < r["1"]["2B"] < 4.0  # +15 a season in 181 innings, mostly regressed
+    # Seasons more than three back don't count.
+    assert tf.defense_ratings(seasons + [(4, fg([[1, "SS", "1350", -50, -50]]), None, None)]) == r
+    # One season counts less than three.
+    assert 0 < tf.defense_ratings(seasons[:1])["1"]["SS"] < r["1"]["SS"]
+
+
+def test_defense_rating_rates_part_timers_per_150_games():
+    # 450 innings at -5 DRS / -3 UZR is -12 per 150 games before regression.
+    r = tf.defense_ratings([(1, fg([[2, "LF", "450", -5, -3]]), None, None)])
+    assert r["2"]["LF"] == pytest.approx(-12 * 450 / 1150)
+
+
+def test_statcast_only_uses_balls_in_play_for_innings():
+    oaa = pd.DataFrame(
+        {"mlbam_id": [3], "primary_pos_formatted": ["CF"], "fielding_runs_prevented": ["6"]}
+    )
+    field = pd.DataFrame({"mlbam_id": [3], "position": ["CF"], "bip": [3750]})
+    r = tf.defense_ratings([(0, None, oaa, field)])
+    assert r["3"]["CF"] == pytest.approx(6 * 1350 / 2050)
+
+
+def test_positions_default_to_average_and_move_free_within_families():
+    eligible = {"CF": 0.0, "RF": 0.0, "1B": 0.0}
+    got = tf.positions(eligible, {"CF": 12.0})
+    assert got["CF"] == 12.0
+    assert got["RF"] > 12.0  # an elite center fielder is better than elite in right
+    assert got["1B"] == 0.0  # no rating at first: average there
+    assert tf.positions({"SS": 0.0, "2B": 0.0}, {"SS": 6.0})["2B"] > 6.0
+    assert tf.positions({"LF": 0.0, "CF": 0.0}, {"LF": -3.0})["CF"] == 0.0  # never below average
+    assert tf.positions({"2B": 0.0, "3B": 0.0}, None) == {"2B": 0.0, "3B": 0.0}
 
 
 def test_framing_arms_and_parks():
     field = pd.DataFrame({"mlbam_id": [9], "position": ["C"], "bip": [3000]})
     framing = tf.framing_ratings([(0, pd.DataFrame({"mlbam_id": [9], "rv_tot": [15.0]}), field)])
-    assert 0 < framing["9"] < 3
+    assert 10 < framing["9"] < 15  # +15 a season, a little regressed
     arm = tf.arms(
         pd.DataFrame({"mlbam_id": [7, 8], "arm_of": [94.0, 82.0]}),
         pd.DataFrame({"mlbam_id": [9], "pop_2b_sba": [1.85]}),
@@ -89,8 +119,8 @@ def test_park_neutralizes_a_hitters_record():
 def test_week_talent_fills_gloves_and_arms():
     wt = WeekTalent(
         league=default_league(),
-        range={"1": ("SS", 6.0)},
-        framing={"9": 2.0},
+        range={"1": {"SS": 6.0}},
+        framing={"9": 19.0},
         arm={"7": 1.5, "9": 1.0},
     )
     ss = wt.hitter(hitter("1"))
@@ -98,10 +128,11 @@ def test_week_talent_fills_gloves_and_arms():
     eligible = wt.hitter(tb.hitter_card(hitter("1"), None, default_league()))
     assert eligible.positions["SS"] == 6.0
     two_way = wt.hitter(hitter("1").__class__(**{**hitter("1").__dict__, "positions": {"2B": 0.0}}))
-    assert two_way.positions == {"2B": 3.0, "SS": 6.0}  # half his range at other spots
+    # Eligible at second only: a shortstop's rating carries over, with credit.
+    assert two_way.positions["2B"] > 6.0 and "SS" not in two_way.positions
     c = wt.hitter(hitter("9"))
-    assert c.positions == {"C": 2.0} and c.arm == 1.0
+    assert c.positions == {"C": 19.0} and c.arm == 1.0
     of = wt.hitter(hitter("7"))
     d = team_defense(Defense(), [(c, "C"), (of, "RF"), (hitter("x"), "LF"), (hitter("y"), "CF")])
     assert d.catcher_arm == 1.0 and d.of_arm == pytest.approx(0.5)
-    assert d.framing == pytest.approx(0.02)
+    assert d.framing == pytest.approx(0.05)

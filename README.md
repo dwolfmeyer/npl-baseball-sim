@@ -212,22 +212,29 @@ with the player's own baseline. Results add what the week's outcomes show
 beyond that, regressed three times as hard. The league environment comes from
 the same season's PAs, and every PA's expectations are scaled by Savant's park
 factors for the park it was played in, so hitters' records are park-neutral.
-Fielding (`talent/fielding.py`): fielding runs prevented (OAA) per 600 balls in
-play at a player's primary position (this season and last, 5/4, regressed),
-half of it at his other experienced spots; catcher framing runs the same way;
-arms from pop time (catchers) and outfield arm strength. `npl-sim sim-week
+Fielding (`talent/fielding.py`): at each position, the average of Statcast OAA
+(in runs), DRS and UZR (FanGraphs) over this season to date and the three
+before, weighted by innings, per 150 games and regressed by 700 innings. A
+player without them is league average at each eligible position. Catcher
+framing runs per 150 games over the same seasons; arms from pop time
+(catchers) and outfield arm strength. On the 20-80 scale each 2.5 runs is a
+grade (5 points). `npl-sim sim-week
 --week N` plays at the blend; the weights are first guesses for Milestone 8
 calibration.
 
 Out-of-position defense (`engine/fielding.py`): each hitter carries his
 fielding value at the positions he's experienced at (`Hitter.positions`).
 Anywhere else, Tango's defensive spectrum (C +8, CF +5, SS +4, 2B 0, 3B -1,
-LF/RF -4, 1B -8 runs per 600 BIP), averaged with Zimmerman's measured
+LF/RF -4, 1B -8 runs per 150 games), averaged with Zimmerman's measured
 position-pair differences (2015) where he has them, sets the cost: moving down
 keeps half the gap, moving up loses all of it, plus an experience penalty and
 more for crossing infield/outfield or catching. A catcher moving out gets no
-credit for the catcher's spot. The fielders' values move hit rates on
-the ball types they handle; the box score lists who played out of position.
+credit for the catcher's spot. An outfielder can play any outfield spot, and
+a shortstop second or third, with no experience penalty and no out-of-position
+flag; his rating carries along the spectrum, so an elite center fielder in
+right is better than elite there. The fielders' values move hit rates on the
+ball types they handle, so a +R fielder saves R runs over 150 games; the box
+score lists who played out of position.
 
 Position eligibility (`npl_sim/eligibility.py`): 20 MLB games at a position
 last season or 10 this season, counted from box scores; players with no

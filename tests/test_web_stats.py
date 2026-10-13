@@ -72,7 +72,7 @@ def test_grades_use_the_talent_blends_range_and_framing():
         framing = {}
 
     g = stats.grades({"SS": 0.0, "3B": 0.0}, HENDERSON, Talent())
-    assert g["SS"] == 60 and g["3B"] == 55  # half his range at his other spot
+    assert g["SS"] == 60 and g["3B"] == 65  # a shortstop moves down to third for free
     assert stats.grades({"SS": 0.0}, 1, Talent())["SS"] == 50
 
 

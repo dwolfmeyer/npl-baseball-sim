@@ -41,9 +41,9 @@ class WeekTalent:
     league: League
     players: dict[str, tb.Talent] = field(default_factory=dict)
     speed: dict[str, float] = field(default_factory=dict)
-    # Fielding (talent/fielding.py): primary-position range rating, catcher
-    # framing (runs per 600 BIP) and arm by player id.
-    range: dict[str, tuple[str, float]] = field(default_factory=dict)
+    # Fielding (talent/fielding.py): range by position and catcher framing
+    # (runs per 150 games), and arm, by player id.
+    range: dict[str, dict[str, float]] = field(default_factory=dict)
     framing: dict[str, float] = field(default_factory=dict)
     arm: dict[str, float] = field(default_factory=dict)
     # Pitch mix by pitcher id: ((Statcast type, share, mph), ...).
@@ -124,7 +124,9 @@ def load_week_talent(clean_root: Path, season: int, week: int, hands=None) -> We
         if frames:
             prior.append((back, pd.concat(frames, ignore_index=True)))
     boards = _boards(this, _last_day(week_pitches))
-    last_boards = _boards(root / str(season - 1), None)
+    prior_boards = {
+        back: _boards(root / str(season - back), None) for back in range(1, tf.SEASONS_BACK + 1)
+    }
     talent = build_week_talent(
         week_pitches,
         to_date,
@@ -135,20 +137,24 @@ def load_week_talent(clean_root: Path, season: int, week: int, hands=None) -> We
         parks=tf.park_factors(boards.get("park_factors")),
     )
     season_pitches = pd.concat([to_date, week_pitches], ignore_index=True)
-    last = next((p for back, p in prior if back == 1), None)
-    add_fielding(talent, boards, season_pitches, last_boards, last)
+    add_fielding(talent, boards, season_pitches, prior_boards, dict(prior))
     return talent
 
 
-def add_fielding(talent, boards: dict, pitches, last_boards: dict, last_pitches) -> None:
-    """Range, framing and arms from this season's and last season's boards."""
-    on_field = tf.bip_on_field(pitches)
-    last_field = tf.bip_on_field(last_pitches) if last_pitches is not None else on_field.iloc[0:0]
-    talent.range = tf.range_ratings(
-        [(0, boards.get("oaa"), on_field), (1, last_boards.get("oaa"), last_field)]
+def add_fielding(
+    talent, boards: dict, pitches, prior_boards: dict[int, dict], prior_pitches: dict
+) -> None:
+    """Range, framing and arms: this season's boards and pitches, and
+    {seasons back: boards} and {seasons back: pitches} for the seasons before."""
+    seasons = [(0, boards, tf.bip_on_field(pitches))]
+    for back, b in sorted(prior_boards.items()):
+        p = prior_pitches.get(back)
+        seasons.append((back, b, tf.bip_on_field(p) if p is not None else None))
+    talent.range = tf.defense_ratings(
+        [(back, b.get("fg_fielding"), b.get("oaa"), f) for back, b, f in seasons]
     )
     talent.framing = tf.framing_ratings(
-        [(0, boards.get("framing"), on_field), (1, last_boards.get("framing"), last_field)]
+        [(back, b.get("framing"), f) for back, b, f in seasons if f is not None]
     )
     talent.arm = tf.arms(boards.get("arm_strength"), boards.get("poptime"))
 
@@ -254,8 +260,8 @@ def sprint_speed(board: pd.DataFrame) -> dict[str, float]:
     return out
 
 
-BOARDS = ("fg_pitching", "sprint_speed", "oaa", "framing", "poptime", "arm_strength",
-          "park_factors")  # fmt: skip
+BOARDS = ("fg_pitching", "fg_fielding", "sprint_speed", "oaa", "framing", "poptime",
+          "arm_strength", "park_factors")  # fmt: skip
 
 
 def _boards(season_dir: Path, through: date | None) -> dict[str, pd.DataFrame]:

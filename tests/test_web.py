@@ -72,7 +72,7 @@ def test_eligibility_rule():
     warnings = " ".join(validate(card, roster(DUCKS), ELIG).warnings)
     assert (
         "Gunnar Henderson is out of position at 3B vs RHP "
-        "(eligible: SS; -2 runs per 600 balls in play there)" in warnings
+        "(eligible: SS; +2 runs per 600 balls in play there)" in warnings
     )
 
 
