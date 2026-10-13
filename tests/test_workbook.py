@@ -89,3 +89,5 @@ def test_committed_league_rosters_cover_every_team():
             by_team.setdefault(p.team, []).append(p)
     assert sorted(by_team) == sorted(TEAMS)
     assert all(25 <= len(r) <= 40 for r in by_team.values())
+    ids = {p.mlb_id for r in by_team.values() for p in r}
+    assert 805347 in ids and 80537 not in ids  # Jim Jarvis, fixed (MLBAM_FIXES)
