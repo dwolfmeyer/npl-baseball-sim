@@ -37,7 +37,11 @@ def test_sim_week_from_lineup_cards():
         box = box_score(g["events"])  # renders like any other game
         assert box.runs[g["away"]] != box.runs[g["home"]]
     assert sum(w for _, w, *_ in standings(result)) == 7
-    assert "Standings" in render_week(result, "Test week")
+    page = render_week(result, "Test week")
+    assert "Standings" in page
+    assert 'id="team"' in page and page.count('class="game" data-away=') == 7
+    for t in teams:  # every team is a filter choice
+        assert f'<option value="{t}">' in page
     assert set(result.carry) == set(teams)
 
 

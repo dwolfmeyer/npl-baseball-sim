@@ -19,6 +19,23 @@ WEEK_CSS = """
 .game .score a{color:var(--accent);font-weight:400;white-space:nowrap}
 .game ul{margin:6px 0 0;padding-left:18px;color:var(--muted)}.game li{margin:2px 0}
 .win{font-weight:700}
+.filter{margin:0 0 12px;display:flex;align-items:center;gap:8px}
+"""
+
+
+# Limits the game list to one team's games (page works without it: all show).
+FILTER_JS = """
+const sel=document.getElementById('team'),games=[...document.querySelectorAll('.game')];
+function apply(){const t=sel.value;let n=0;
+for(const g of games){const show=!t||g.dataset.away===t||g.dataset.home===t;
+g.hidden=!show;n+=show}
+document.getElementById('count').textContent=t?n+' of '+games.length+' games':'';
+const u=new URL(location);t?u.searchParams.set('team',t):u.searchParams.delete('team');
+history.replaceState(null,'',u)}
+sel.onchange=apply;
+sel.value=new URLSearchParams(location.search).get('team')||'';
+if(sel.value!==(new URLSearchParams(location.search).get('team')||''))sel.value='';
+apply();
 """
 
 
@@ -77,6 +94,8 @@ def render_week(
         f"<tr><td>{escape(t)}</td><td>{w}</td><td>{lo}</td><td>{rs}</td><td>{ra}</td></tr>"
         for t, w, lo, rs, ra in standings(result)
     )
+    teams = sorted({t for g in result.games for t in (g["away"], g["home"])})
+    options = "".join(f'<option value="{escape(t)}">{escape(t)}</option>' for t in teams)
     games = []
     for i, g in enumerate(result.games):
         final = g["events"][-1]
@@ -89,7 +108,8 @@ def render_week(
         notes = _notes(g, g["away"], who) + _notes(g, g["home"], who)
         items = "".join(f"<li>{escape(n)}</li>" for n in notes)
         games.append(
-            f'<div class="game"><div class="score"><span>{DAY_NAMES[g["day"] % 7]}: '
+            f'<div class="game" data-away="{escape(g["away"])}" data-home="{escape(g["home"])}">'
+            f'<div class="score"><span>{DAY_NAMES[g["day"] % 7]}: '
             f"{away} at {home}</span>{box}</div><ul>{items}</ul></div>"
         )
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -98,8 +118,11 @@ def render_week(
 <h1>{escape(title)}</h1><p class="sub">{escape(subtitle)}</p>
 <h2>Standings</h2><div class="wrap"><table><tr><th>Team</th><th>W</th><th>L</th><th>RS</th>
 <th>RA</th></tr>{table}</table></div>
-<h2 style="margin-top:20px">Games</h2><div class="games">{"".join(games)}</div>
-</main></body></html>"""
+<h2 style="margin-top:20px">Games</h2>
+<label class="filter">Team <select id="team"><option value="">All teams</option>{options}</select>
+<span id="count" class="sub"></span></label>
+<div class="games">{"".join(games)}</div>
+</main><script>{FILTER_JS}</script></body></html>"""
 
 
 def write_week(
