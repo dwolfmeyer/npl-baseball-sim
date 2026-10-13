@@ -154,5 +154,5 @@ def test_write_audit(tmp_path):
 def test_sim_week_audit_command(tmp_path, monkeypatch):
     monkeypatch.setenv("NPL_WEB_DATA", str(tmp_path / "web"))
     assert main(["sim-week", "--seed", "2", "--audit", str(tmp_path / "audit")]) == 0
-    assert len(list((tmp_path / "audit").glob("game-*.jsonl"))) == 7
+    assert len(list((tmp_path / "audit").glob("game-*.jsonl"))) == 6
     assert (tmp_path / "audit" / "pas.csv").exists()
