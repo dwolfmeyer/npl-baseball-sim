@@ -161,4 +161,46 @@ def test_wild_pitches_passed_balls_and_balks(games):
     g = next(g for g in games if any(e["type"] == "wild_pitch" for e in g))
     box = box_score(g)  # runs add up, with the WP note
     assert any(k == "WP" for k, _ in box.game_notes)
-    assert "Wild pitch by pitcher" in format_log(game_log(g))
+    assert "batting, wild pitch by pitcher" in format_log(game_log(g))
+
+
+def test_steals_and_wild_pitches_happen_on_the_pas_pitches(games):
+    plays = ("stolen_base", "caught_stealing", "wild_pitch", "passed_ball", "balk")
+    cut_short = 0
+    for g in games:
+        pending: list[dict] = []
+        for e in g:
+            if e["type"] in plays:
+                assert e["batter"] and e["pitch"] >= (e["type"] != "balk")
+                pending.append(e)
+                cut_short += bool(e.get("pitches"))
+            elif e["type"] == "pa":
+                for d in pending:  # the PA they came during, which threw more pitches after
+                    assert d["batter"] == e["batter"] and e["pitches"] > d["pitch"]
+                pending = []
+            elif e["type"] == "half_end":
+                # Only a third out on the bases or a walk-off leaves a PA unfinished,
+                # and then its pitches ride on the play that ended it.
+                assert (
+                    not pending
+                    or pending[-1].get("pitches") == pending[-1]["pitch"]
+                    or (pending[-1]["type"] == "balk")
+                )
+                pending = []
+        box = box_score(g)
+        thrown = sum(e["pitches"] for e in g if e["type"] == "pa" or e.get("pitches"))
+        assert sum(p.pitches for side in box.pitching.values() for p in side.values()) == thrown
+    assert cut_short  # a caught stealing for the third out, a walk-off wild pitch
+
+
+def test_at_bat_pop_up_marks_the_pitch(games):
+    log = next(game_log(g) for g in games if any(e["type"] == "wild_pitch" for e in g))
+    notes = [
+        q.note
+        for half in log.halves
+        for p in half.plays
+        if p.at_bat
+        for q in p.at_bat.pitches
+        if q.note
+    ]
+    assert "Wild pitch" in notes

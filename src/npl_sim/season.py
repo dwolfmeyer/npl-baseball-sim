@@ -184,6 +184,7 @@ def summarize(result: WeekResult, week: Week, season: SeasonResult) -> None:
                 "balk",
             ):
                 t[e["type"]] += 1
+                t["pitches"] += e.get("pitches", 0)  # a PA cut short
 
 
 def sim_season(

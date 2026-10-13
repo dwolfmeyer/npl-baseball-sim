@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from npl_sim.engine.box import dp_positions
 from npl_sim.engine.detail import POSITION_TITLE
@@ -141,6 +141,7 @@ def game_log(events: list[dict]) -> GameLog:
         p["id"]: p["bats"] for t in roster.teams.values() for p in t.lineup + t.bench if "bats" in p
     }
     arms = {p["id"]: p for t in roster.teams.values() for p in t.pitchers}
+    during: list[dict] = []  # steals and wild pitches on the coming PA's pitches
 
     for i, e in enumerate(events):
         if e["type"] in ("game_start", "final"):
@@ -173,17 +174,19 @@ def game_log(events: list[dict]) -> GameLog:
                 outs=e["outs_before"] + e["outs"],
                 runs=runs,
                 li=li,
-                at_bat=_at_bat(e, i, before, bats, arms, full),
+                at_bat=_at_bat(e, i, before, bats, arms, full, during),
             )
+            during = []
         elif e["type"] == "stolen_base":
             base = BASE_NAME[e.get("base", "2B")]
-            play = Play(f"{full[e['runner']]} steals {base} base.", e["type"], outs=e["outs_after"])
+            desc = f"{_batting(e, full)}{full[e['runner']]} steals {base} base."
+            play = Play(desc, e["type"], outs=e["outs_after"])
         elif e["type"] == "caught_stealing":
             base = e.get("base", "2B")
             cover = fielder("3B" if base == "3B" else "SS")
             desc = (
-                f"{full[e['runner']]} caught stealing {BASE_NAME[base]} base, "
-                f"{fielder('C')} to {cover}."
+                f"{_batting(e, full)}{full[e['runner']]} caught stealing {BASE_NAME[base]} "
+                f"base, {fielder('C')} to {cover}."
             )
             play = Play(desc, e["type"], outs=e["outs_after"])
         elif e["type"] == "pitching_change":
@@ -228,11 +231,15 @@ def game_log(events: list[dict]) -> GameLog:
             score[offense] += runs
             half.runs += runs
             pitcher = full[e["pitcher"]]
-            lead = {
-                "wild_pitch": f"Wild pitch by pitcher {pitcher}.",
-                "passed_ball": f"Passed ball by {fielder('C')}.",
-                "balk": f"{pitcher} balks.",
-            }[e["type"]]
+            lead = (
+                _batting(e, full)
+                + {
+                    "wild_pitch": f"wild pitch by pitcher {pitcher}.",
+                    "passed_ball": f"passed ball by {fielder('C')}.",
+                    "balk": f"{pitcher} balks.",
+                }[e["type"]]
+            )
+            lead = lead[0].upper() + lead[1:]
             play = Play(
                 " ".join([lead, *_runner_notes(e, full)]),
                 e["type"],
@@ -244,6 +251,9 @@ def game_log(events: list[dict]) -> GameLog:
             play = Play(f"Runner placed on 2nd: {full[e['runner']]}.", e["type"])
         elif e["type"] == "half_end":
             half.left_on_base = e["left_on_base"]
+            during = []
+        if e["type"] in PITCH_PLAYS:
+            during.append(e)
         if play is not None and e["type"] in (
             "pa",
             "stolen_base",
@@ -263,7 +273,40 @@ def game_log(events: list[dict]) -> GameLog:
     return GameLog(roster.teams["away"].name, roster.teams["home"].name, halves, we_start)
 
 
-def _at_bat(e: dict, i: int, score: dict, bats: dict, arms: dict, full: dict) -> AtBat:
+# Plays that happen on a pitch during a PA, and what the at-bat pop-up calls them.
+PITCH_PLAYS = {
+    "wild_pitch": "Wild pitch",
+    "passed_ball": "Passed ball",
+    "stolen_base": "Stolen base",
+    "caught_stealing": "Caught stealing",
+}
+
+
+def _batting(e: dict, full: dict) -> str:
+    """'With Juan Soto batting, ' for a play during a PA (older logs have no batter)."""
+    return f"With {full[e['batter']]} batting, " if e.get("batter") in full else ""
+
+
+def _mark(pitches: list[Pitch], during: list[dict]) -> list[Pitch]:
+    """Note each steal and wild pitch on the pitch it came on: a wild pitch or
+    passed ball on a ball where there is one, never on the PA's last pitch."""
+    pitches = list(pitches)
+    used: set[int] = set()
+    for d in during:
+        free = [i for i in range(len(pitches) - 1) if i not in used]
+        if not free:
+            break
+        want = min(max(d.get("pitch", 1) - 1, 0), len(pitches) - 2)
+        if d["type"] in ("wild_pitch", "passed_ball"):
+            balls = [i for i in free if pitches[i].call == "Ball"]
+            free = balls or free
+        i = min(free, key=lambda j: abs(j - want))
+        used.add(i)
+        pitches[i] = replace(pitches[i], note=PITCH_PLAYS[d["type"]])
+    return pitches
+
+
+def _at_bat(e: dict, i: int, score: dict, bats: dict, arms: dict, full: dict, during=()) -> AtBat:
     arm = arms.get(e["pitcher"], {})
     throws = arm.get("throws", "R")
     side = bats.get(e["batter"], "R")
@@ -279,6 +322,7 @@ def _at_bat(e: dict, i: int, score: dict, bats: dict, arms: dict, full: dict) ->
         e.get("k_type"),
         len(e["scored"]),
     )
+    pitches = _mark(pitches, [d for d in during if d.get("batter", e["batter"]) == e["batter"]])
     return AtBat(
         title=RESULT_TITLE.get(e["result"], e["result"]),
         batter=full[e["batter"]],

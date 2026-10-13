@@ -165,7 +165,11 @@ class WeekState:
             self.starts_left[starter] = self.starts_left.get(starter, 0) - 1
             self.last_start[starter] = day
         pitches: dict[str, int] = {}
+        batting = next((e["half"] for e in events if e["type"] == "pa" and e["team"] == team), None)
         for e in events:
+            if e["type"] != "pa" and e.get("pitches") and e["half"] != batting:
+                # A PA cut short on the bases or by a walk-off wild pitch.
+                pitches[e["pitcher"]] = pitches.get(e["pitcher"], 0) + e["pitches"]
             if e["type"] == "pa" and e["team"] == team:
                 self.pa_left[e["batter"]] = self.pa_left.get(e["batter"], 0) - 1
             elif e["type"] == "pa":
