@@ -9,7 +9,7 @@ leverage (hooks.py), and relievers by the owner's bullpen designations.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 from npl_sim.engine import bullpen as pen
 from npl_sim.engine import detail, fielding
@@ -152,8 +152,13 @@ class _Side:
 
 
 class GameSim:
-    def __init__(self, away: TeamCard, home: TeamCard, env: LeagueEnv, seed: int):
+    def __init__(
+        self, away: TeamCard, home: TeamCard, env: LeagueEnv, seed: int, audit: list | None = None
+    ):
         self.env = env
+        # When a list, each PA appends what went into it (npl_sim/audit.py);
+        # recording draws no random numbers, so results are the same either way.
+        self.audit = audit
         self.rng = random.Random(seed)
         # Play detail (fielders, counts) draws from its own stream; see detail.py.
         self.detail_rng = random.Random(seed * 7919 + 17)
@@ -527,6 +532,7 @@ class GameSim:
             self.bases,
             defense.runs - offense.runs,
         )
+        fatigue = self._fatigue(defense)
         probs = pa_probabilities(
             hitter.rates_vs(pitcher.throws),
             pitcher.rates_vs(side),
@@ -535,9 +541,24 @@ class GameSim:
             pitcher.throws,
             self.park,
             defense.defense,
-            self._fatigue(defense),
+            fatigue,
             self.alignment,
         )
+        if self.audit is not None:
+            self.audit.append(
+                {
+                    "event": len(self.events),  # index of the PA event logged below
+                    "batter_rates": asdict(hitter.rates_vs(pitcher.throws)),
+                    "pitcher_rates": asdict(pitcher.rates_vs(side)),
+                    "league_rates": asdict(self.env.split(side, pitcher.throws)),
+                    "park": {k: getattr(self.park, k)[side] for k in ("single", "xbh", "hr")},
+                    "defense": asdict(defense.defense),
+                    "fatigue": fatigue,
+                    "pitches_before": defense.pitches,
+                    "batters_faced": defense.batters_faced,
+                    "probabilities": dict(probs),
+                }
+            )
         result = self.rng.choices(list(probs), weights=list(probs.values()))[0]
         kind = result.split(":")[0] if ":" in result else result
         mean = PITCHES["BIP" if ":" in result else kind]
@@ -725,6 +746,9 @@ class GameSim:
         return "GO"
 
 
-def simulate_game(away: TeamCard, home: TeamCard, env: LeagueEnv, seed: int) -> list[dict]:
-    """Play one game and return its event log."""
-    return GameSim(away, home, env, seed).play()
+def simulate_game(
+    away: TeamCard, home: TeamCard, env: LeagueEnv, seed: int, audit: list | None = None
+) -> list[dict]:
+    """Play one game and return its event log. Pass a list as `audit` to also
+    collect each PA's inputs and outcome odds (see npl_sim/audit.py)."""
+    return GameSim(away, home, env, seed, audit).play()

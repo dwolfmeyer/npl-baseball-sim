@@ -17,6 +17,7 @@ from npl_sim.talent import blend as tb
 from npl_sim.talent import fielding as tf
 from npl_sim.talent.env import League, default_league, league
 from npl_sim.talent.events import pitch_flags, plate_appearances
+from npl_sim.talent.lines import stat_lines
 
 READ_COLUMNS = [
     "game_date", "batter", "pitcher", "stand", "p_throws", "events", "bb_type", "description",
@@ -29,6 +30,7 @@ PRIOR_SEASONS = 2
 # fold the pitch data the same way so counts line up.
 STATCAST_TO_FG = {"ST": "SL", "SV": "CU", "FA": "FF", "CS": "CU"}
 SPRINT_AVERAGE, SPRINT_SD = 27.0, 1.5  # ft/s
+SEASON_LABEL = {1: "last season", 2: "two seasons ago"}
 ARSENAL_MIN = 150  # pitches this season before his mix replaces last season's
 
 
@@ -46,6 +48,8 @@ class WeekTalent:
     arm: dict[str, float] = field(default_factory=dict)
     # Pitch mix by pitcher id: ((Statcast type, share, mph), ...).
     arsenal: dict[str, tuple] = field(default_factory=dict)
+    # Real stat lines behind the blend, for the audit log (talent/lines.py).
+    lines: dict[str, dict] = field(default_factory=dict)
 
     def hitter(self, h: Hitter) -> Hitter:
         if h.id.startswith("AAA-"):
@@ -180,6 +184,10 @@ def build_week_talent(
         players=players,
         speed=speed,
         arsenal=arsenals(season_pitches, last_pitches),
+        lines=stat_lines(
+            [("sim week", week_pa), ("season to date", to_date_pa)]
+            + [(SEASON_LABEL[back], pa) for back, pa, _ in prior_pa if back in SEASON_LABEL]
+        ),
     )
 
 
