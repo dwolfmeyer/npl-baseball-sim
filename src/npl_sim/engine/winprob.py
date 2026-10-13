@@ -120,6 +120,8 @@ def count_runs(games: list[list[dict]]) -> dict[tuple[str, int], list[float]]:
             if e["type"] == "pa":
                 half.append(((state(e["bases_before"]), e["outs_before"]), runs))
                 runs += len(e["scored"])
+            elif e["type"] in ("wild_pitch", "passed_ball", "balk"):
+                runs += len(e["scored"])
             elif e["type"] == "half_end":
                 if not (e["half"] == "bottom" and e["inning"] >= 9):
                     for key, before in half:

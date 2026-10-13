@@ -98,8 +98,10 @@ def test_walkoff_ends_the_game_at_once(season):
             and len(final["line"]["home"]) >= 9
             and (len(final["line"]["home"]) == len(final["line"]["away"]))
         ):
-            last = [e for e in g if e["type"] == "pa"][-1]
+            # The last play (a PA, or a wild pitch, passed ball or balk) scores.
+            last = [e for e in g if "scored" in e][-1]
             assert last["half"] == "bottom" and last["scored"]
+            assert g[g.index(last) + 1]["type"] == "half_end"
 
 
 def test_park_hr_factor_is_applied_once():

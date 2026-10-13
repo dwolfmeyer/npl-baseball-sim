@@ -30,7 +30,7 @@ RESULT_TITLE = {
     "K": "Strikeout", "BB": "Walk", "HBP": "Hit By Pitch", "HR": "Home Run", "1B": "Single",
     "2B": "Double", "3B": "Triple", "GO": "Groundout", "FO": "Flyout", "LO": "Lineout",
     "PO": "Pop Out", "SF": "Sac Fly", "DP": "Grounded Into DP", "FC": "Forceout",
-    "E": "Field Error",
+    "E": "Field Error", "SH": "Sac Bunt",
 }  # fmt: skip
 
 
@@ -219,11 +219,35 @@ def game_log(events: list[dict]) -> GameLog:
                 e["type"],
                 outs=e.get("outs", 0),
             )
+        elif e["type"] in ("wild_pitch", "passed_ball", "balk"):
+            runs = len(e["scored"])
+            score[offense] += runs
+            half.runs += runs
+            pitcher = full[e["pitcher"]]
+            lead = {
+                "wild_pitch": f"Wild pitch by pitcher {pitcher}.",
+                "passed_ball": f"Passed ball by {fielder('C')}.",
+                "balk": f"{pitcher} balks.",
+            }[e["type"]]
+            play = Play(
+                " ".join([lead, *_runner_notes(e, full)]),
+                e["type"],
+                pitcher=e["pitcher"],
+                outs=e["outs_after"],
+                runs=runs,
+            )
         elif e["type"] == "auto_runner":
             play = Play(f"Runner placed on 2nd: {full[e['runner']]}.", e["type"])
         elif e["type"] == "half_end":
             half.left_on_base = e["left_on_base"]
-        if play is not None and e["type"] in ("pa", "stolen_base", "caught_stealing"):
+        if play is not None and e["type"] in (
+            "pa",
+            "stolen_base",
+            "caught_stealing",
+            "wild_pitch",
+            "passed_ball",
+            "balk",
+        ):
             after = we(e, e["bases_after"], play.outs)
             play.home_we = after
             play.wpa = (after - home_we) * (1 if offense == "home" else -1)
@@ -269,7 +293,9 @@ def _describe_pa(e: dict, full: dict[str, str], fielder) -> str:
     res, bip, pos = e["result"], e["bip"], e["fielder"]
     batter = full[e["batter"]]
     ball = BALL_TYPE.get(bip or "", "")
-    if res == "K":
+    if e.get("bunt"):
+        lead = _describe_bunt(e, batter, fielder)
+    elif res == "K":
         lead = (
             f"{batter} strikes out swinging."
             if e.get("k_type") == "swinging"
@@ -282,6 +308,8 @@ def _describe_pa(e: dict, full: dict[str, str], fielder) -> str:
     elif res == "HR":
         ball = BALL_TYPE[e.get("batted_ball", "FB")]
         lead = f"{batter} homers on a {ball} to {e['direction']}."
+    elif res == "2B" and e.get("ground_rule"):
+        lead = f"{batter} hits a ground-rule double on a {ball} to {fielder(pos)}."
     elif res in HIT_VERB:
         lead = f"{batter} {HIT_VERB[res]} on a {ball} to {fielder(pos)}."
     elif res == "GO":
@@ -304,6 +332,27 @@ def _describe_pa(e: dict, full: dict[str, str], fielder) -> str:
     else:  # pragma: no cover - every engine result is handled above
         lead = f"{batter} {res}."
     return " ".join([lead, *_runner_notes(e, full)])
+
+
+def _describe_bunt(e: dict, batter: str, fielder) -> str:
+    res, pos = e["result"], e["fielder"]
+    if res == "K":
+        return f"{batter} strikes out on a foul bunt."
+    if res == "SH":
+        if pos == "1B":
+            return f"{batter} out on a sacrifice bunt to {fielder('1B')}."
+        return f"{batter} out on a sacrifice bunt, {fielder(pos)} to {fielder('1B')}."
+    if res == "1B":
+        return f"{batter} singles on a bunt ground ball to {fielder(pos)}."
+    if res == "PO":
+        return f"{batter} pops out on a bunt to {fielder(pos)}."
+    if res == "DP":
+        return (
+            f"{batter} bunts into a double play, {fielder(pos)} to {fielder('SS')} "
+            f"to {fielder('1B')}."
+        )
+    cover = "3B" if e["bases_before"][1] else "SS"
+    return f"{batter} bunts into a force out, {fielder(pos)} to {fielder(cover)}."
 
 
 def _runner_notes(e: dict, full: dict[str, str]) -> list[str]:

@@ -132,6 +132,19 @@ or from a set inning on when the spot's leverage index reaches a threshold.
 Defaults when the owner sets nothing: out after 6 runs, and from the 7th in
 spots of LI 2.0 or more. Each pitching change logs its reason.
 
+MLB playing rules: extra innings start with a runner on second; the
+three-batter minimum (a pitcher faces three batters or finishes the half
+inning before he can come out); a walk-off ends the game when the winning run
+scores, crediting the batter with only as many bases as that runner advanced
+(every run counts on a home run); ground-rule doubles (about 6% of doubles,
+every runner gets exactly two bases); sacrifice flies; sacrifice bunts
+(`engine/manager.py` `Bunting`, `TeamCard.bunt`: by default a hitter at least
+0.03 runs per PA worse than average bunts half the time with nobody out, a
+runner on first or second and third open, from the 7th inning, tied or down
+one; outcomes include bunt singles, force outs, pop-ups and foul-bunt
+strikeouts); wild pitches, passed balls (runs unearned) and balks at recent
+MLB rates.
+
 Weekly playing time (`engine/workload.py`, `play_week`): each player's sim
 week follows his real one. Hitters get 1.25x their MLB PA and start while
 they have 3 or more left; a hitter who can't is replaced by the bench player

@@ -85,6 +85,21 @@ def fielder(rng: random.Random, result: str, bip: str | None, side: str) -> str 
     return _pick(rng, _OUTFIELD_AIR, side)
 
 
+_BUNT = {
+    "SH": {"P": 0.35, "C": 0.15, "1B": 0.25, "3B": 0.25},
+    "1B": {"P": 0.25, "C": 0.10, "1B": 0.15, "3B": 0.50},
+    "FC": {"P": 0.45, "C": 0.20, "1B": 0.15, "3B": 0.20},
+    "DP": {"P": 0.60, "C": 0.40},
+    "PO": {"P": 0.30, "C": 0.40, "1B": 0.15, "3B": 0.15},
+}
+
+
+def bunt_fielder(rng: random.Random, result: str) -> str | None:
+    """Who fielded a bunt; None when the batter struck out bunting."""
+    w = _BUNT.get(result)
+    return rng.choices(list(w), weights=list(w.values()))[0] if w else None
+
+
 def hr_ball(rng: random.Random) -> str:
     return "LD" if rng.random() < 0.15 else "FB"
 
