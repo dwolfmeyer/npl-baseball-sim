@@ -123,7 +123,9 @@ out the engine reads the spot's leverage from Tango's Leverage Index table
 (`engine/leverage.py`: inning, half, score, outs, runners) and picks from the
 matching tier, preferring the platoon edge on the next batter,
 then the owner's order. Openers' starters and piggybacks (`TeamCard.follow`)
-enter first, in order. Untagged pens enter in listed order.
+enter first, in order. Untagged pens enter in listed order. A checked opener
+(`TeamCard.opener`) goes one inning at most, even a clean one, though he can
+still come out sooner (pitch limit, hook, runs, the three-batter minimum).
 
 Starter hooks (`engine/hooks.py`, `TeamCard.hook`): besides his pitch limit,
 a starter (or the bulk arm after an opener) comes out after a set number of

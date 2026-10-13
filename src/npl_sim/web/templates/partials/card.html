@@ -38,14 +38,11 @@
       <option value="{{ h.mlb_id }}" {% if h.mlb_id == pid %}selected{% endif %}>{{ h.name }} · {{ fields[h.mlb_id].positions | join(" ") or "DH" }}</option>
       {% endif %}{% endfor %}
     </select>
-    {% set eligible = fields[pid].positions if pid in fields else positions %}
     <select class="pos" id="{{ side }}_pos_{{ i }}" name="{{ side }}_pos_{{ i }}" aria-label="Position {{ i }} {{ label }}">
       {% for p in positions %}
-      <option value="{{ p }}" {% if p == pos %}selected{% endif %}>{{ p }}{% if pid and p != "DH" and p not in eligible %} · out of pos{% if pid in fields %}, {{ "%+d"|format(fields[pid].costs[p]) }}{% endif %}{% endif %}</option>
+      <option value="{{ p }}" {% if p == pos %}selected{% endif %}>{{ p }}</option>
       {% endfor %}
     </select>
-    {% set ln = fields[pid].lines[side] if pid in fields else none %}
-    <span class="line" {% if ln %}title="{{ ln.pa }} PA {{ label }}: AVG/OBP/SLG"{% endif %}>{% if ln %}{{ ln.text() }}{% elif pid %}<span class="muted">no PA</span>{% endif %}</span>
     <span class="moves">
       <button type="button" class="mv" data-move="-1" aria-label="Move batter {{ i }} up">▲</button>
       <button type="button" class="mv" data-move="1" aria-label="Move batter {{ i }} down">▼</button>
@@ -56,7 +53,7 @@
   <div class="bench">
     <span class="muted small">Bench</span>
     {% for h in hitters %}{% if h.mlb_id in active and h.mlb_id not in in_order %}
-    <span class="chip" data-drag="chip" data-pid="{{ h.mlb_id }}" title="{{ fields[h.mlb_id].games }}">{% set ln = fields[h.mlb_id].lines[side] %}{{ h.name }} <small>{{ fields[h.mlb_id].positions | join(" ") or "DH" }}{% if ln %} · {{ ln.text() }}{% endif %}</small></span>
+    <span class="chip" data-drag="chip" data-pid="{{ h.mlb_id }}" title="{{ fields[h.mlb_id].games }}">{{ h.name }} <small>{{ fields[h.mlb_id].positions | join(" ") or "DH" }}</small></span>
     {% endif %}{% endfor %}
   </div>
 </section>
@@ -65,7 +62,7 @@
 
 <section class="card">
   <h2>Rotation</h2>
-  <p class="muted small">Each starter comes out at the first of: his pitch limit, the time through the order you pull him after, the runs allowed you set, or a big spot (leverage index at or above your setting, from that inning on). Check Opener to have the listed pitcher go an inning or so, then pick the piggyback who pitches the bulk innings after him (up to the pitch limit).</p>
+  <p class="muted small">Each starter comes out at the first of: his pitch limit, the time through the order you pull him after, the runs allowed you set, or a big spot (leverage index at or above your setting, from that inning on). Check Opener to have the listed pitcher go one inning at most (he can still come out sooner), then pick the piggyback who pitches the bulk innings after him (up to the pitch limit).</p>
   {% set rotation_ids = card.rotation | reject("none") | list %}
   {% set planned = card.plans | map(attribute="piggyback") | reject("none") | list %}
   <div class="wrap"><table class="rotation">
@@ -233,9 +230,8 @@
         {% endif %}{% endfor %}
       </select></td>
       <td><select id="sub_pos_{{ i + 1 }}" name="sub_pos_{{ i + 1 }}" aria-label="Position for replacement {{ i + 1 }}">
-        {% set eligible = fields[sub.player].positions if sub and sub.player in fields else positions %}
         {% for p in positions[:-1] %}
-        <option value="{{ p }}" {% if sub and p == sub.position %}selected{% endif %}>{{ p }}{% if sub and p not in eligible %} · out of pos{% if sub.player in fields %}, {{ "%+d"|format(fields[sub.player].costs[p]) }}{% endif %}{% endif %}</option>
+        <option value="{{ p }}" {% if sub and p == sub.position %}selected{% endif %}>{{ p }}</option>
         {% endfor %}
       </select></td>
       <td><select id="sub_inning_{{ i + 1 }}" name="sub_inning_{{ i + 1 }}" aria-label="First inning for replacement {{ i + 1 }}">
@@ -283,7 +279,7 @@
       <button type="button" class="btn secondary small-btn" data-select-all="0">Clear</button>
     </span>
   </div>
-  <p class="muted small">Up to {{ active_limit }} players. Hitters are eligible at a position with 20 MLB games there last season or 10 this season; anyone can DH. Anyone else can still play there, out of position, at a fielding cost shown in runs per 600 balls in play (moving down the defensive spectrum costs less than moving up).</p>
+  <p class="muted small">Up to {{ active_limit }} players. Hitters are eligible at a position with 20 MLB games there last season or 10 this season; anyone can DH. Anyone else can still play there, out of position, at a fielding cost (moving down the defensive spectrum costs less than moving up).</p>
   <div class="grid2">
   <div class="wrap"><table>
     <tr><th>Hitters</th><th>NPL</th><th>Eligible</th><th>Active</th></tr>

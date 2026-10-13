@@ -169,6 +169,9 @@ class TeamCard:
     bunt: Bunting = field(default_factory=Bunting)
     # Stealing and taking the extra base: how aggressive, and who may steal.
     running: Baserunning = field(default_factory=Baserunning)
+    # The starter is an opener (Dave, 2026-10-13): he never goes past one
+    # inning, though he can still come out before finishing it.
+    opener: bool = False
 
     @property
     def short(self) -> str:
@@ -330,6 +333,8 @@ class GameSim:
             return "pitch_count"
         if p.id in card.outs_limit and side.pitcher_outs >= card.outs_limit[p.id]:
             return "workload"
+        if card.opener and p.id == card.starter.id and not mid_inning and side.pitcher_outs >= 3:
+            return "opener"  # one inning, even a clean one
         if p.id == card.starter.id or p.id in card.follow:
             return card.hook.reason(
                 side.batters_faced,

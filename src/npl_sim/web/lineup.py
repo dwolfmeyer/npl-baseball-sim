@@ -121,7 +121,7 @@ def can_play(p: NplPlayer, position: str, elig: Eligibility | None = None) -> bo
 class StarterPlan:
     pitch_limit: int = DEFAULT_PITCH_LIMIT
     tto_hook: int = 0  # pull after this many times through the order; 0 = no limit
-    # An opener game: the listed pitcher goes an inning or so and the piggyback
+    # An opener game: the listed pitcher goes one inning at most and the piggyback
     # pitches the bulk innings after him (the piggyback only applies then).
     opener: bool = False
     piggyback: int | None = None
@@ -764,8 +764,9 @@ def team_card(
     slot, starter_id = slots[starter_slot % len(slots)]
     plan = card.plan(slot)
     starters = {pid for _, pid in slots}
-    # In an opener game the listed pitcher goes an inning or so and the piggyback
-    # takes the bulk innings, up to the slot's pitch limit.
+    # In an opener game the listed pitcher goes one inning at most (the engine
+    # enforces it) and the piggyback takes the bulk innings, up to the slot's
+    # pitch limit.
     if plan.opener:
         first = arm(starter_id, OPENER_PITCHES)
         bulk = [arm(plan.piggyback, plan.pitch_limit)] if plan.piggyback else []
@@ -802,6 +803,7 @@ def team_card(
         alignment_rules=alignment_rules,
         defensive_subs=defensive_subs,
         hook=plan.hook(),
+        opener=plan.opener,
         relief=relief,
         # Pinch hitters: active hitters not starting today.
         bench=tuple(

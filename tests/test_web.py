@@ -135,11 +135,13 @@ def test_opener_and_piggyback_plan():
     assert tc.bullpen[0].id == str(piggyback) and tc.bullpen[0].pitch_limit == 80
     assert len({p.id for p in tc.bullpen}) == len(tc.bullpen)  # nobody listed twice
     assert tc.follow == (str(piggyback),) and str(piggyback) not in tc.relief
+    assert tc.opener  # the engine holds him to one inning
     # Without the opener box the piggyback doesn't apply.
     card.plans[1] = StarterPlan(pitch_limit=80, piggyback=piggyback)
     tc = team_card(DUCKS, "DUC", card, r, 1, "R", ELIG)
     assert tc.starter.id == str(card.rotation[1]) and tc.starter.pitch_limit == 80
     assert str(piggyback) in [p.id for p in tc.bullpen]  # he's just a reliever again
+    assert not tc.opener
 
 
 @pytest.fixture
@@ -373,11 +375,13 @@ def test_autofill_route(client):
 
 
 def test_any_player_any_position_and_no_closer_needed(client):
-    # Every position dropdown offers every position; ineligible ones are marked.
+    # Every position dropdown offers every position, unmarked: owners know the penalties.
     page = client.get("/teams/midwest-ducksnorts/lineup").text
     pos_selects = [s.split("</select>")[0] for s in page.split("<select") if 'name="rhp_pos_' in s]
     assert pos_selects and all(s.count("<option") == len(POSITIONS) for s in pos_selects)
-    assert "out of pos" in page
+    assert "· out of pos" not in page
+    # No slash lines beside the batting order or on the bench chips.
+    assert 'class="line"' not in page and "AVG/OBP/SLG" in page.split("Hitting and fielding")[1]
 
     card = default_card(roster(DUCKS), ELIG)
     card.roles = {pid: ("MR" if role == "CL" else role) for pid, role in card.roles.items()}
@@ -495,6 +499,6 @@ def test_out_of_position_defense_reaches_the_engine(client):
     tc = team_card("Ducks", "MDK", card, r, 0, "R", ELIG)
     for h, _ in tc.lineup:
         assert h.positions == {pos: 0.0 for pos in fielding(by_id[int(h.id)], ELIG)[0]}
-    # The position dropdown shows the cost of an out-of-position spot.
+    # The position dropdowns no longer show the cost; the warning on save still does.
     page = client.get("/teams/midwest-ducksnorts/lineup").text
-    assert "· out of pos, -" in page
+    assert "· out of pos" not in page
