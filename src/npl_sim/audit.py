@@ -7,6 +7,17 @@ realism.
 kinds of records (the "record" key):
 
 - game: teams, day, seed, final score.
+- setup: one per team, the owner's settings behind the manager decisions:
+  pitch limits, the starter's hook (runs, times through, leverage), bullpen
+  roles and stint lengths, weekly outs caps, pinch-hit rules, defensive
+  subs, steal aggressiveness and alignment rules.
+- decision: one per non-PA event, in game order with the PAs: pitching
+  changes (why, the outgoing pitcher's pitches, batters faced and runs,
+  leverage, the bullpen situation tier, the reliever's role and who else was
+  available), pinch hitters (leverage, expected run gain), defensive subs,
+  steals and caught stealing, the extra-inning runner, and wild pitches,
+  passed balls and balks. Sacrifice-bunt PAs carry `"bunt": true` in
+  their outcome and the bunt's odds in place of the swing-away odds.
 - player: each batter and pitcher who took part, with the card rates the
   engine used (vs LHP/RHP or vs LHB/RHB), the talent blend's indexes and
   layers (baseline, process, results), and real stat lines by season and
@@ -36,6 +47,44 @@ from npl_sim.engine.playlog import game_log
 from npl_sim.talent.lines import HITS
 
 AUDIT_REAL_SEASON = "season to date"  # the real line pas.csv shows beside each PA
+DECISIONS = (
+    "pitching_change",
+    "pinch_hitter",
+    "defensive_sub",
+    "stolen_base",
+    "caught_stealing",
+    "auto_runner",
+    "wild_pitch",
+    "passed_ball",
+    "balk",
+)
+
+
+def _decision(e: dict, number: int, score: dict, extra: dict, names: dict, setup: dict) -> dict:
+    """A manager or baserunning decision: the event, player names, and for a
+    pitching change the outgoing pitcher's workload and the reliever's role."""
+    rec = {
+        "record": "decision",
+        "game": number,
+        "kind": e["type"],
+        "inning": e["inning"],
+        "half": e["half"],
+        "score_before": dict(score),
+    }
+    rec |= {k: v for k, v in e.items() if k not in ("type", "inning", "half")}
+    for key in ("out", "into", "runner", "pitcher"):
+        if key in e:
+            rec[f"{key}_name"] = names.get(e[key], (e[key], None))[0]
+    if e["type"] == "pitching_change":
+        rec |= {k: v for k, v in extra.items() if k != "event"}
+        side = "home" if e["half"] == "top" else "away"
+        relief = setup.get(side, {}).get("relief", {})
+        if e["into"] in relief:
+            rec["role"] = relief[e["into"]]["role"]
+            rec["stint_outs"] = relief[e["into"]]["outs"]
+        if e["into"] in setup.get(side, {}).get("follow", []):
+            rec["role"] = "follow"
+    return rec
 
 
 def summarize(probs: dict[str, float]) -> dict[str, dict[str, float]]:
@@ -81,14 +130,25 @@ def game_records(game: dict, number: int, seed: int | None = None, talent=None) 
             "line": final.get("line"),
         }
     ]
-    plays = [p for _, ps in game_log(events).plays() for p in ps if p.kind == "pa"]
-    pa_at = [i for i, e in enumerate(events) if e["type"] == "pa"]
     by_event = {d["event"]: d for d in trail}
+    setup = by_event.get(0, {}).get("setup", {})
+    for side in ("away", "home"):
+        if side in setup:
+            records.append({"record": "setup", "game": number, "side": side, **setup[side]})
+    plays = iter([p for _, ps in game_log(events).plays() for p in ps if p.kind == "pa"])
     cards: dict[tuple[str, str], dict] = {}
     score = {"away": 0, "home": 0}
-    for n, (at, play) in enumerate(zip(pa_at, plays, strict=True), 1):
-        e, detail = events[at], by_event[at]
-        offense = "away" if e["half"] == "top" else "home"
+    n = 0
+    for at, e in enumerate(events):
+        offense = "away" if e.get("half") == "top" else "home"
+        if e["type"] in DECISIONS:
+            records.append(_decision(e, number, score, by_event.get(at, {}), names, setup))
+            score[offense] += len(e.get("scored", []))
+            continue
+        if e["type"] != "pa":
+            continue
+        n += 1
+        play, detail = next(plays), by_event[at]
         before = dict(score)
         score[offense] += len(e["scored"])
         ab = play.at_bat
@@ -137,6 +197,8 @@ def game_records(game: dict, number: int, seed: int | None = None, talent=None) 
                     "fielder": e.get("fielder"),
                     "direction": e.get("direction"),
                     "k_type": e.get("k_type"),
+                    "bunt": bool(e.get("bunt")),
+                    "ground_rule": bool(e.get("ground_rule")),
                     "outs": e["outs"],
                     "runs": len(e["scored"]),
                     "rbi": e["rbi"],
