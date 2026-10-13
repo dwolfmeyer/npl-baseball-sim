@@ -82,6 +82,44 @@ def test_starters_need_no_days_of_rest():
     assert all(m.bullpen_game for g in result.games[4:] for m in [g["moves"]["Home"]])
 
 
+def series_games(*lengths):
+    """Games for back-to-back series between the same teams, with series ids."""
+    day, games = 0, []
+    for n, length in enumerate(lengths):
+        games += [(day + i, "Away", "Home", n) for i in range(length)]
+        day += length
+    return games
+
+
+def starters_of(result, team="Home"):
+    return [g["moves"][team].starter for g in result.games]
+
+
+def test_a_starter_pitches_once_per_series_but_again_in_the_next():
+    usage = week(starts={f"Home-SP{i}": 2 for i in range(1, 6)})
+    result = play_week(TEAMS, series_games(3, 3), usage, DEFAULT_ENV, seed=4)
+    first, second = starters_of(result)[:3], starters_of(result)[3:]
+    assert len(set(first)) == 3 and len(set(second)) == 3
+    assert set(first) & set(second)  # the rotation turns over into the next series
+
+
+def test_series_with_too_few_starters_goes_to_the_pen_not_a_repeat():
+    usage = week(starts={f"Home-SP{i}": 0 for i in range(3, 6)} | {"Home-SP1": 2, "Home-SP2": 2})
+    result = play_week(TEAMS, series_games(3), usage, DEFAULT_ENV, seed=4)
+    starters = starters_of(result)
+    assert len(set(starters[:2])) == 2
+    assert result.games[2]["moves"]["Home"].bullpen_game
+    # The same starts are free again in the next series.
+    result = play_week(TEAMS, series_games(3, 3), usage, DEFAULT_ENV, seed=4)
+    assert starters_of(result)[3] in ("Home-SP1", "Home-SP2")
+
+
+def test_games_without_a_series_id_are_unrestricted():
+    usage = week(starts={f"Home-SP{i}": 0 for i in range(2, 6)} | {"Home-SP1": 3})
+    result = play_week(TEAMS, GAMES[:3], usage, DEFAULT_ENV, seed=4)
+    assert starters_of(result) == ["Home-SP1"] * 3
+
+
 def test_bullpen_game_when_no_starter_can_go():
     usage = week(starts={f"Home-SP{i}": 0 for i in range(1, 6)})
     result = play_week(TEAMS, GAMES[:1], usage, DEFAULT_ENV, seed=3)

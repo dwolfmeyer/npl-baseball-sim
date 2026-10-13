@@ -29,6 +29,11 @@ Starters
   MAX_CARRIED_STARTS). The rotation turns in the owner's order, skipping a
   starter with no starts left. When nobody can start, the reliever with the
   most innings left opens a bullpen game. Unused starts carry into next week.
+- A starter pitches at most once in a series (Dave, 2026-10-13): once he has
+  pitched in any role, he doesn't start again or follow an opener in the
+  rest of that series, though he can in the next one. Games carry a series id
+  for this (play_week's optional fourth element); games without one are
+  unrestricted.
 
 Relievers
 - Budget = MLB relief outs that week x RELIEF_SLACK, rounded up. In a game a
@@ -89,6 +94,8 @@ class WeekState:
     starts_left: dict[str, int]
     outs_left: dict[str, int]
     rotation_next: int = 0
+    # Pitchers who have pitched in each series so far, by series id.
+    series_pitchers: dict[object, set[str]] = field(default_factory=dict)
 
     @classmethod
     def open(
@@ -117,8 +124,12 @@ class WeekState:
         )
 
     # -- availability --------------------------------------------------------
-    def can_start(self, pid: str) -> bool:
-        return self.starts_left.get(pid, 0) > 0
+    def can_start(self, pid: str, series: object = None) -> bool:
+        return self.starts_left.get(pid, 0) > 0 and not self.pitched_in(pid, series)
+
+    def pitched_in(self, pid: str, series: object) -> bool:
+        """Has this pitcher already pitched in this series?"""
+        return series is not None and pid in self.series_pitchers.get(series, ())
 
     def can_relieve(self, pid: str) -> bool:
         return self.outs_left.get(pid, 0) > 0
@@ -127,8 +138,9 @@ class WeekState:
         return self.pa_left.get(pid, 0) > 0
 
     # -- after a game --------------------------------------------------------
-    def record(self, events: list[dict], team: str, moves: Moves) -> None:
-        """Charge this team's PA, outs and start from one game."""
+    def record(self, events: list[dict], team: str, moves: Moves, series: object = None) -> None:
+        """Charge this team's PA, outs and start from one game, and note who
+        pitched in its series."""
         starter = None if moves.bullpen_game else moves.starter
         if starter is not None:
             self.starts_left[starter] = self.starts_left.get(starter, 0) - 1
@@ -140,6 +152,10 @@ class WeekState:
                     self._out(e["pitcher"], e["outs"])
             elif e["type"] == "caught_stealing" and e["pitcher"] != starter:
                 self._out(e["pitcher"], 1)  # only our pitchers have relief budgets here
+        if series is not None:
+            used = self.series_pitchers.setdefault(series, set())
+            used.add(moves.starter)
+            used.update(e["pitcher"] for e in events if e["type"] == "pa" and e["team"] != team)
 
     def _out(self, pid: str, n: int) -> None:
         if pid in self.outs_left:
@@ -186,18 +202,22 @@ class Moves:
     standin_pitcher: bool = False  # the whole pen was out: a (AAA) arm relieves
 
 
-def next_starter(team: WeekTeam, state: WeekState) -> Pitcher | None:
+def next_starter(team: WeekTeam, state: WeekState, series: object = None) -> Pitcher | None:
     n = len(team.rotation)
     for k in range(n):
         i = (state.rotation_next + k) % n
-        if state.can_start(team.rotation[i].id):
+        if state.can_start(team.rotation[i].id, series):
             state.rotation_next = (i + 1) % n
             return team.rotation[i]
     return None
 
 
 def game_card(
-    team: WeekTeam, state: WeekState, starter: Pitcher | None, opposing_throws: str
+    team: WeekTeam,
+    state: WeekState,
+    starter: Pitcher | None,
+    opposing_throws: str,
+    series: object = None,
 ) -> tuple[TeamCard, Moves]:
     """The engine's card for one game after this week's playing time, with
     `starter` from next_starter (None = a bullpen game)."""
@@ -207,8 +227,12 @@ def game_card(
     if starter is not None:
         starter = card.starter if card.starter.id == starter.id else starter
 
+    rotation = {p.id for p in team.rotation}
+
     def available(p: Pitcher) -> bool:
         if p.id in card.follow:  # a piggyback: a starter's budget or a reliever's
+            if p.id in rotation and state.pitched_in(p.id, series):
+                return False  # a starter pitches once a series
             return state.outs_left.get(p.id, 0) > 0 or state.starts_left.get(p.id, 0) > 0
         return state.can_relieve(p.id)
 
@@ -373,23 +397,25 @@ def play_week(
     audit: bool = False,
 ) -> WeekResult:
     """Play one sim week. `teams` is keyed by team name, `games` lists
-    (day, away, home), and `mlb` is the league's real week by player id.
+    (day, away, home) or (day, away, home, series id), and `mlb` is the
+    league's real week by player id.
     `audit` keeps each game's per-PA inputs (npl_sim/audit.py) as "audit"."""
     carry = carry or {}
     states = {name: WeekState.open(mlb, carry.get(name), t.players) for name, t in teams.items()}
     played = []
-    for n, (day, away, home) in enumerate(sorted(games, key=lambda g: g[0])):
-        starters = {k: next_starter(teams[k], states[k]) for k in (away, home)}
+    for n, (day, away, home, *rest) in enumerate(sorted(games, key=lambda g: g[0])):
+        series = rest[0] if rest else None
+        starters = {k: next_starter(teams[k], states[k], series) for k in (away, home)}
 
         # A bullpen game's opener isn't known until the card is built.
         throws = {k: p.throws if p is not None else "R" for k, p in starters.items()}
         cards, moves = {}, {}
         for k, other in ((away, home), (home, away)):
-            cards[k], moves[k] = game_card(teams[k], states[k], starters[k], throws[other])
+            cards[k], moves[k] = game_card(teams[k], states[k], starters[k], throws[other], series)
         trail: list | None = [] if audit else None
         events = simulate_game(cards[away], cards[home], env, seed * 1000 + n, trail)
         for k in (away, home):
-            states[k].record(events, k, moves[k])
+            states[k].record(events, k, moves[k], series)
         game = {"day": day, "away": away, "home": home, "events": events, "moves": moves}
         if audit:
             game["audit"] = trail

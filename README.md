@@ -187,7 +187,9 @@ starts plus up to one carried from last week, in rotation order; with nobody
 able to start, the reliever with the most innings left opens a bullpen game.
 Relievers get 1.5x their MLB relief outs. There are no rest-day rules (no
 days between starts, no limit on pitching days in a row), so the budgets are
-the only limit. Unused starts and the rotation turn carry into next week. `npl_sim/playing_time.py`
+the only limit, except that a starter pitches at most once in a series (the weekly
+games carry a series id; he can start again in the next series, and with no
+starter free the pen opens a bullpen game). Unused starts and the rotation turn carry into next week. `npl_sim/playing_time.py`
 reads a real week from the pipeline's clean tables.
 
 `npl-sim sim-week` (`npl_sim/simweek.py`) plays a week between the test teams'

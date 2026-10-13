@@ -46,6 +46,7 @@ def test_week_games_are_days_of_the_week():
     weeks, schedule = _two_weeks()
     games = week_games(schedule, weeks[1])
     assert len(games) == 14 and games[0][0] == 0 and games[-1][0] == 6
+    assert len({g[3] for g in games}) == sum(i.week == weeks[1].number for i in schedule)
 
 
 def test_season_carries_starts_across_weeks():

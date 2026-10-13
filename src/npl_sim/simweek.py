@@ -181,7 +181,7 @@ def sim_week(
     cards: dict[str, lineup.LineupCard],
     rosters: dict[str, list[NplPlayer]],
     elig: Eligibility | None,
-    schedule: list[tuple[int, str, str]],
+    schedule: list[tuple],
     mlb_week: MlbWeek | None,
     seed: int,
     carry: dict[str, Carry] | None = None,
