@@ -152,6 +152,12 @@ from the eligibility data (full time when he has none). `--out` writes a week
 page with standings and who sat or filled in, plus a Gameday page per game;
 `--save` adds the games to the web app. Without `--week` everyone is league
 average; with it, each player plays at his talent blend for that week.
+With `--audit DIR` it also writes an audit log for checking the engine's realism: `game-NN.jsonl` per game with every
+plate appearance (game state, the batter's, pitcher's and league's input
+rates, park, defense and fatigue, the outcome odds the engine drew from, the
+result, batted-ball type, fielder, runners, count, the simulated pitches,
+WPA and leverage) and each player's card, talent-blend layers and real MLB
+stat lines by season and opponent hand; plus `pas.csv`, one row per PA.
 
 Calibration harness (`npl_sim/calibration/`, Milestone 8): `npl-sim
 calibrate` and `tests/test_calibration.py` check that box scores add up,
@@ -215,6 +221,7 @@ npl-sim demo-game --seed 3 --html game.html  # Gameday-style page: Box / Play-by
 npl-sim demo-week --seed 2                   # a week under the playing-time budget
 npl-sim sim-week --out week/                 # the test teams' lineup cards, one week
 npl-sim sim-week --week 12 --out week/       # ...with 2026 week 12's real MLB usage
+npl-sim sim-week --week 12 --audit audit/    # ...and an audit log of every PA (npl_sim/audit.py)
 ```
 
 League structure lives in `config/league.yaml`. When divisions realign, add a

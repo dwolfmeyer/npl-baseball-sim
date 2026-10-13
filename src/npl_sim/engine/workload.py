@@ -292,7 +292,7 @@ def _bench_fit(team: WeekTeam, state: WeekState, pos: str, in_use: set[str]) -> 
 
 @dataclass
 class WeekResult:
-    games: list[dict]  # {day, away, home, events, moves: {team: Moves}}
+    games: list[dict]  # {day, away, home, events, moves: {team: Moves}, audit?}
     states: dict[str, WeekState]
     carry: dict[str, Carry]
 
@@ -304,9 +304,11 @@ def play_week(
     env,
     seed: int,
     carry: dict[str, Carry] | None = None,
+    audit: bool = False,
 ) -> WeekResult:
     """Play one sim week. `teams` is keyed by team name, `games` lists
-    (day, away, home), and `mlb` is the league's real week by player id."""
+    (day, away, home), and `mlb` is the league's real week by player id.
+    `audit` keeps each game's per-PA inputs (npl_sim/audit.py) as "audit"."""
     carry = carry or {}
     states = {name: WeekState.open(mlb, carry.get(name), t.players) for name, t in teams.items()}
     played = []
@@ -318,8 +320,12 @@ def play_week(
         cards, moves = {}, {}
         for k, other in ((away, home), (home, away)):
             cards[k], moves[k] = game_card(teams[k], states[k], day, starters[k], throws[other])
-        events = simulate_game(cards[away], cards[home], env, seed * 1000 + n)
+        trail: list | None = [] if audit else None
+        events = simulate_game(cards[away], cards[home], env, seed * 1000 + n, trail)
         for k in (away, home):
             states[k].record(events, k, day, moves[k])
-        played.append({"day": day, "away": away, "home": home, "events": events, "moves": moves})
+        game = {"day": day, "away": away, "home": home, "events": events, "moves": moves}
+        if audit:
+            game["audit"] = trail
+        played.append(game)
     return WeekResult(played, states, {k: s.close() for k, s in states.items()})

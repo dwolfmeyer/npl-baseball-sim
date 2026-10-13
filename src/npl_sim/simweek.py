@@ -187,19 +187,21 @@ def sim_week(
     carry: dict[str, Carry] | None = None,
     env=DEFAULT_ENV,
     talent=None,
+    audit: bool = False,
 ) -> WeekResult:
     """Play a week between saved lineup cards (keyed by team name).
     `mlb_week` None plays a typical week from each player's season pace
     (default_week). `talent` (a talent.load.WeekTalent) gives every player
     his blended ability for the week and the league its real environment;
     None keeps everyone league average. Each game's events are
-    simulate_game's, so box scores and game pages render as usual."""
+    simulate_game's, so box scores and game pages render as usual. `audit`
+    keeps each PA's inputs for npl_sim/audit.py."""
     teams = {name: week_team(name, cards[name], rosters[name], elig) for name in cards}
     if talent is not None:
         teams = {name: talent.team(t) for name, t in teams.items()}
         env = talent.league.env()
     mlb = mlb_week if mlb_week is not None else default_week(teams, rosters, elig, seed)
-    return play_week(teams, schedule, mlb, env, seed, carry)
+    return play_week(teams, schedule, mlb, env, seed, carry, audit)
 
 
 def default_week(

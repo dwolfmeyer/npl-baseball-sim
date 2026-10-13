@@ -104,6 +104,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     simw.add_argument("--clean-root", type=Path, default=Path("data/clean"))
     simw.add_argument("--out", type=Path, help="write index.html and a page per game here")
     simw.add_argument("--save", action="store_true", help="also save the games to the web app")
+    simw.add_argument(
+        "--audit",
+        type=Path,
+        help="write an audit log here: game-NN.jsonl per game (every PA's inputs, odds, "
+        "result, batted ball and pitches, plus players' real stats) and pas.csv",
+    )
 
     seas = sub.add_parser(
         "sim-season",
@@ -361,7 +367,9 @@ def _sim_week(args: argparse.Namespace) -> int:
         talent = load_week_talent(args.clean_root, args.season, args.week, hands)
         ability = f"the talent blend for {args.season} week {args.week}"
     schedule = round_robin(teams)
-    result = sim_week(cards, rosters, elig, schedule, mlb, args.seed, talent=talent)
+    result = sim_week(
+        cards, rosters, elig, schedule, mlb, args.seed, talent=talent, audit=bool(args.audit)
+    )
     print(f"Playing time: {usage}\nAbility: {ability}\n")
     for g in result.games:
         f = g["events"][-1]
@@ -375,6 +383,10 @@ def _sim_week(args: argparse.Namespace) -> int:
         subtitle = f"Playing time: {usage}. Ability: {ability}. Seed {args.seed}."
         index = write_week(result, args.out, title, subtitle, names)
         print(f"\nWrote {index}")
+    if args.audit:
+        from npl_sim.audit import write_audit
+
+        print(f"Wrote the audit log to {write_audit(result.games, args.audit, args.seed, talent)}")
     if args.save:
         for g in result.games:
             box = box_score(g["events"])
