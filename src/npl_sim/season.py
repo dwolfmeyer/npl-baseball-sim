@@ -137,11 +137,11 @@ def pace_week(
     return MlbWeek(pa=pa, starts=starts, relief_outs=relief)
 
 
-def week_games(schedule: list[ScheduledSeries], week: Week) -> list[tuple[int, str, str]]:
-    """(day 0-6, away, home) for every game of `week`."""
+def week_games(schedule: list[ScheduledSeries], week: Week) -> list[tuple[int, str, str, int]]:
+    """(day 0-6, away, home, series id) for every game of `week`."""
     return sorted(
-        ((d - week.start).days, item.series.away, item.series.home)
-        for item in schedule
+        ((d - week.start).days, item.series.away, item.series.home, n)
+        for n, item in enumerate(schedule)
         if item.week == week.number
         for d in item.dates
     )
