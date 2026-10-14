@@ -27,7 +27,7 @@ table.mlb tr.cut td{border-bottom:2px dashed #d50032}
 </style>
 {% endblock %}
 {% block body %}
-{% macro url(view, expanded) %}/standings?view={{ view }}{% if expanded %}&amp;expanded=1{% endif %}{% endmacro %}
+{% macro url(view, expanded) %}/standings?view={{ view }}{% if expanded %}&amp;expanded=1{% endif %}{% if wk %}&amp;week={{ wk }}{% endif %}{% endmacro %}
 <div class="mlb-tabs">
 <div class="tabs">
 {% for key, label in (("division", "Division"), ("wildcard", "Wild Card"), ("league", "League")) %}

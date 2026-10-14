@@ -32,9 +32,11 @@ from npl_sim.rosters import eligibility
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.rosters.sources import NPL_DATABASE_URL_ENV, players_from_database, players_from_dump
+from npl_sim.schedule.calendar import load_calendar, sim_weeks
 from npl_sim.season_stats import (
     EXPANDED,
     RaceRow,
+    SeasonStats,
     division_standings,
     expanded_records,
     format_gb,
@@ -51,7 +53,6 @@ from npl_sim.web.store import Store, slug
 ROSTER_DUMP_ENV = "NPL_ROSTER_DUMP"
 DEFAULT_DUMP = Path("tests/fixtures/npl_2026_test_teams.json")
 SEASON = 2026
-SEASON_START = date(SEASON, 3, 30)  # a Monday; the sim weeks of the season to date follow it
 log = logging.getLogger(__name__)
 
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -108,6 +109,20 @@ def create_app(
     elig = elig if elig is not None else eligibility.load(SEASON)
     alignment = load_league_file().for_season(SEASON)
     slots = team_slots(alignment)
+    calendar = sim_weeks(load_calendar(SEASON))
+
+    def week_start_date(n: int) -> date:
+        """The Monday of sim week n; the weeks past the real season carry on weekly."""
+        if n <= len(calendar):
+            return calendar[n - 1].start
+        return calendar[-1].start + timedelta(weeks=n - len(calendar))
+
+    def week_dates(n: int) -> str:
+        """The MLB dates of sim week n (Monday to Sunday), "Mar 23 \u2013 Mar 29"."""
+        start = week_start_date(n)
+        end = start + timedelta(days=6)
+        return f"{start:%b} {start.day} \u2013 {end:%b} {end.day}"
+
     rosters: dict[str, list[NplPlayer]] = {s.team: [] for s in slots}
     for p in players:
         if p.team in rosters and p.is_active_mlb and p.mlb_id is not None:
@@ -340,7 +355,7 @@ def create_app(
         # Fold the week into the season to date, in date order, under full names.
         names = {str(p.mlb_id): p.name for r in week_rosters.values() for p in r}
         season, weeks_played = store.load_season()
-        week_start = SEASON_START + timedelta(weeks=weeks_played)
+        week_start = week_start_date(weeks_played + 1)
         for g in sorted(result.games, key=lambda g: g["day"]):
             season.add_game(week_start + timedelta(days=g["day"] - 1), box_score(g["events"]))
         for totals in (season.batters, season.pitchers):
@@ -373,17 +388,56 @@ def create_app(
             raise HTTPException(404, "No such week")
         return HTMLResponse(week["page"])
 
-    def season_page(request: Request, template: str, heading: str, **context):
-        season, weeks = store.load_season()
+    def season_as_of(week: int) -> SeasonStats:
+        """The season after `week` weeks (0, or a week not simmed, is the latest)."""
+        available = store.season_weeks()
+        latest = max(available, default=0)
+        return store.load_season(week if week in available and week != latest else None)[0]
+
+    def season_page(
+        request: Request,
+        template: str,
+        heading: str,
+        week: int,
+        params: dict | None = None,
+        **context,
+    ):
+        """Render a season page as of `week` (0, or a week not simmed, is the latest)."""
+        available = store.season_weeks()
+        latest = max(available, default=0)
+        shown = week if week in available else latest
+        season = season_as_of(shown)
+        carried = {k: v for k, v in (params or {}).items() if v != ""}
+
+        def week_url(n: int) -> str:
+            return f"{request.url.path}?" + urlencode({**carried, "week": n})
+
+        before = max((n for n in available if n < shown), default=None)
+        after = min((n for n in available if n > shown), default=None)
+        nav = {
+            "shown": shown,
+            "latest": latest,
+            "dates": week_dates(shown) if shown else "",
+            "options": [
+                (n, f"Week {n} \u00b7 {week_dates(n)}", n in available)
+                for n in range(1, max(len(calendar), latest) + 1)
+            ],
+            "prev": week_url(before) if before else None,
+            "next": week_url(after) if after else None,
+            "latest_url": week_url(latest) if shown != latest else None,
+            "carried": carried,
+        }
         return TEMPLATES.TemplateResponse(
             request,
             template,
             {
                 "heading": heading,
-                "weeks": weeks,
+                "weeks": shown,
                 "games": season.games,
                 "season": season,
                 "abbr": abbr,
+                "nav": nav,
+                "carried": carried,
                 **context,
             },
         )
@@ -393,8 +447,8 @@ def create_app(
     last_seed = len(alignment.leagues[0].divisions) + alignment.wild_cards
 
     @app.get("/standings", response_class=HTMLResponse)
-    def standings_page(request: Request, view: str = "division", expanded: int = 0):
-        season, _ = store.load_season()
+    def standings_page(request: Request, view: str = "division", expanded: int = 0, week: int = 0):
+        season = season_as_of(week)
         view = view if view in ("division", "wildcard", "league") else "division"
         race = {name: rows for name, rows in wild_card_race(season, alignment)}
         wcgb = {r.team: r.wcgb for rows in race.values() for r in rows}
@@ -419,6 +473,9 @@ def create_app(
             request,
             "standings.html",
             "Standings",
+            week,
+            {"view": view, "expanded": expanded or ""},
+            wk=week or "",
             view=view,
             expanded=bool(expanded),
             tables=tables,
@@ -441,8 +498,9 @@ def create_app(
         sort: str = "",
         dir: str = "",
         page: int = 1,
+        week: int = 0,
     ):
-        season, _ = store.load_season()
+        season = season_as_of(week)
         query = StatsQuery(
             kind=kind if kind in ("hitting", "pitching") else "hitting",
             group="teams" if group == "teams" else "players",
@@ -462,6 +520,7 @@ def create_app(
             "qualified": int(query.qualified),
             "sort": sort,
             "dir": dir,
+            "week": week or "",
             "page": page,
         }
 
@@ -474,6 +533,8 @@ def create_app(
             request,
             "stats.html",
             "Stats",
+            week,
+            {k: v for k, v in params.items() if k != "page"},
             q=query,
             table=table,
             link=link,

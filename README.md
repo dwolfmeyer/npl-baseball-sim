@@ -210,7 +210,11 @@ like mlb.com/standings: by division, wild card (two a league, set by `wild_cards
 `config/league.yaml`) or league, with a Standard/Expanded toggle for one-run, extra-inning,
 division, league, interleague and over/under .500 records. Stats is laid out like
 mlb.com/stats: hitting or pitching, players or teams, filters for league, team and
-qualified players, click-to-sort columns and paging. Without `--week` each player gets a typical week at his season pace
+qualified players, click-to-sort columns and paging. Each simmed week is
+cached (`season-weeks/NN.json` in the web data directory), and a week picker on both pages
+(with back and forward arrows) shows the season as of any week, labeled with its real MLB
+dates from `config/calendar.yaml` (week 1 is Mar 23 - Mar 29, week 27 Sep 21 - Sep 27 in
+2026); `?week=N` links to one, and the default is the latest. Without `--week` each player gets a typical week at his season pace
 from the eligibility data (full time when he has none). `--out` writes a week
 page with standings, a short recap per team (record, best bat and start, notable games,
 bullpen use and who covered; `reporting/recap.py`) and who sat or filled in, plus a Gameday page per game;
