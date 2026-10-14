@@ -55,7 +55,9 @@ class Roster:
             lasts = Counter(_last(p["name"]) for p in people)
             for p in people:
                 last = _last(p["name"])
-                if lasts[last] > 1 and " " in p["name"]:
+                if p["name"].startswith("(AAA)"):
+                    self.short[p["id"]] = p["name"]  # a stand-in: "(AAA) P", never "(. P"
+                elif lasts[last] > 1 and " " in p["name"]:
                     self.short[p["id"]] = f"{p['name'][0]}. {last}"
                 else:
                     self.short[p["id"]] = last
