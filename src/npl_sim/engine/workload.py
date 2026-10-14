@@ -55,6 +55,7 @@ PA_SLACK = 1.25
 RELIEF_SLACK = 1.5
 MAX_CARRIED_STARTS = 1
 BULLPEN_GAME_PITCHES = 50
+RELIEVER_START_OUTS = 9  # a reliever starting in the sim goes 3 innings at most
 # Positions a player can be moved to beyond his eligible ones (see above).
 FLEX = {
     "1B": {"LF", "RF"},
@@ -146,6 +147,8 @@ class WeekState:
         """Charge this team's PA, outs and start from one game, and note who
         pitched in its series."""
         starter = None if moves.bullpen_game else moves.starter
+        if moves.bullpen_game and self.starts_left.get(moves.starter, 0) > 0:
+            self.starts_left[moves.starter] -= 1  # a reliever who started in MLB opened
         if starter is not None:
             self.starts_left[starter] = self.starts_left.get(starter, 0) - 1
         for e in events:
@@ -243,13 +246,19 @@ def game_card(
     relievers = [p for p in card.bullpen if available(p)]
     moves = Moves(starter="")
     moves.unavailable = [p.id for p in card.bullpen if p not in relievers]
+    forced_outs: dict[str, int] = {}
     if starter is None:
-        # Bullpen game: the arm with the most outs left opens.
-        opener = max(relievers, key=lambda p: state.outs_left.get(p.id, 0), default=None)
+        # Bullpen game: only a reliever who started a game in MLB this week opens
+        # (three innings at most); anyone else would be a closer starting, so a
+        # (AAA) arm opens instead. A listed opener is a rotation slot, not here.
+        openers = [p for p in relievers if state.starts_left.get(p.id, 0) > 0]
+        opener = max(openers, key=lambda p: state.starts_left.get(p.id, 0), default=None)
         if opener is None:
-            opener = card.bullpen[0] if card.bullpen else team.rotation[0]
+            opener = standin_pitcher(f"AAA-{card.short}-S")
+        else:
+            relievers = [p for p in relievers if p.id != opener.id]
+            forced_outs[opener.id] = RELIEVER_START_OUTS
         starter = replace(opener, pitch_limit=BULLPEN_GAME_PITCHES)
-        relievers = [p for p in relievers if p.id != opener.id]
         moves.bullpen_game = True
     moves.starter = starter.id
     if not relievers:
@@ -264,6 +273,7 @@ def game_card(
         for p in relievers
         if p.id not in card.follow and not p.id.startswith("AAA-")
     }
+    outs_limit.update(forced_outs)
     game = replace(
         card,
         lineup=lineup,

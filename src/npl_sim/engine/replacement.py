@@ -45,4 +45,4 @@ def standin_pitcher(pid: str) -> Pitcher:
     def card(side: str):
         return replace(average_split(side, "R"), **STANDIN_PITCHER)
 
-    return Pitcher(pid, "(AAA) P", "R", vs_lhb=card("L"), vs_rhb=card("R"), pitch_limit=150)
+    return Pitcher(pid, "(AAA) P", "R", vs_lhb=card("L"), vs_rhb=card("R"), pitch_limit=90)

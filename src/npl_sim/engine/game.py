@@ -46,6 +46,10 @@ BUNT_ODDS = {
     "K": 0.08,
 }
 HIT_BASES = {"1B": 1, "2B": 2, "3B": 3}
+# Pitcher limits that no card setting can lift.
+MAX_PITCHES = 120
+NO_HITTER_PITCHES = 130  # a starter still working a no-hitter
+MOP_UP_RUNS = 7  # a reliever is pulled after allowing this many
 # Base stealing (_maybe_steal). A runner's attempt rate per time on first
 # becomes a chance before each PA he's on first with second open; tuned so a
 # league of average runners tries about as often as MLB in 2024-25 (0.96 a
@@ -194,6 +198,9 @@ class _Side:
     pitcher_outs: int = 0  # outs recorded by the current pitcher
     pitches: int = 0
     batters_faced: int = 0
+    hits_allowed: int = (
+        0  # by the whole staff this game; a starter with none is working a no-hitter
+    )
     runs: int = 0
     pitchers_used: list[str] = field(default_factory=list)
     lineup: list[tuple[Hitter, str]] = field(default_factory=list)  # this game's, after subs
@@ -205,6 +212,15 @@ class _Side:
 
     def set_defense(self) -> None:
         self.defense = fielding.team_defense(self.card.defense, self.lineup)
+
+
+SPARE_ARMS = 4  # (AAA) pitchers a team can burn through after its whole staff is used
+
+
+def _spares(card: TeamCard) -> list[Pitcher]:
+    from npl_sim.engine.replacement import standin_pitcher  # replacement imports this module
+
+    return [standin_pitcher(f"AAA-{card.short}-R{i}") for i in range(1, SPARE_ARMS + 1)]
 
 
 class GameSim:
@@ -327,6 +343,14 @@ class GameSim:
     def _should_pull(self, side: _Side, mid_inning: bool) -> str | None:
         """Why the current pitcher comes out before the next PA, or None."""
         p, card = side.pitcher, side.card
+        # Hard stops come before the three-batter minimum: nobody throws more
+        # than 120 pitches (130 for a starter with a no-hitter) or sits through
+        # a mop-up blowout of 7 runs (Dave, 2026-10-14).
+        no_hitter = p.id == card.starter.id and side.hits_allowed == 0
+        if side.pitches >= (NO_HITTER_PITCHES if no_hitter else MAX_PITCHES):
+            return "pitch_count"
+        if p.id != card.starter.id and side.charged.get(p.id, 0) >= MOP_UP_RUNS:
+            return "mop_up"
         if mid_inning and side.batters_faced < 3:
             return None  # three-batter minimum: he faces three or finishes the inning
         if side.pitches >= p.pitch_limit + (15 if mid_inning else 0):
@@ -357,7 +381,10 @@ class GameSim:
                 return nxt, {}
         available = [p for p in available if p.id not in card.follow]
         if not available:
-            return None, {}
+            # Out of arms: a (AAA) replacement takes over rather than leaving a
+            # tired pitcher in.
+            spare = next((p for p in _spares(card) if p.id not in side.used), None)
+            return spare, {}
         if not card.relief:
             return available[0], {}  # no designations: listed order
         offense = self._batting()
@@ -397,7 +424,7 @@ class GameSim:
 
     def _start(self) -> None:
         def team(card: TeamCard) -> dict:
-            pitchers = [card.starter, *card.bullpen]
+            pitchers = [card.starter, *card.bullpen, *_spares(card)]
             return {
                 "name": card.name,
                 "abbr": card.short,
@@ -825,6 +852,8 @@ class GameSim:
             outcome = self._walkoff_hit(outcome, hitter, before, scored)
         rbi = len(scored) if outcome not in ("E", "DP") else 0
         defense.pitcher_outs += self.outs - outs_before
+        if outcome in HIT_BASES or outcome == "HR":
+            defense.hits_allowed += 1
         bip = kind if ":" in result else None
         if bunt is not None and bip:
             bip = "PU" if outcome == "PO" else "GB"

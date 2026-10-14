@@ -133,6 +133,10 @@ enter first, in order. Untagged pens enter in listed order. A checked opener
 (`TeamCard.opener`) goes one inning at most, even a clean one, though he can
 still come out sooner (pitch limit, hook, runs, the three-batter minimum).
 
+Hard limits on every pitcher (`engine/game.py`): 120 pitches (130 for a starter
+working a no-hitter) and a reliever is pulled after allowing 7 runs. When the
+staff is used up, (AAA) arms take over instead of leaving a tired pitcher in.
+
 Starter hooks (`engine/hooks.py`, `TeamCard.hook`): besides his pitch limit,
 a starter (or the bulk arm after an opener) comes out after a set number of
 times through the order, once he has been charged with a set number of runs,
@@ -190,7 +194,7 @@ another fielder sliding over while the bench or DH covers his spot. Only then
 does a (AAA) stand-in play, at Scoresheet's penalty levels
 (`engine/replacement.py`). Defensive-spectrum costs still apply. Starters get their MLB
 starts plus up to one carried from last week, in rotation order; with nobody
-able to start, the reliever with the most innings left opens a bullpen game.
+able to start, a bullpen game opens with a reliever who started a game in MLB that week (three innings at most), else a (AAA) arm; a closer never starts.
 Relievers get 1.5x their MLB relief outs. There are no rest-day rules (no
 days between starts, no limit on pitching days in a row), so the budgets are
 the only limit, except that a starter pitches at most once in a series (the weekly
