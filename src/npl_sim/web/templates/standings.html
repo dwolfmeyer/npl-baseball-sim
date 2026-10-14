@@ -1,0 +1,16 @@
+{% extends "season.html" %}
+{% block body %}
+{% for league, division, rows in divisions %}
+<h2>{{ league }} {{ division }}</h2>
+<div class="wrap"><table>
+<tr><th>Team</th><th>W</th><th>L</th><th>PCT</th><th>GB</th><th>RS</th><th>RA</th><th>Diff</th><th>Home</th><th>Road</th><th>L10</th><th>Strk</th></tr>
+{% for r in rows %}
+<tr><td>{{ r.team }}</td><td>{{ r.record.w }}</td><td>{{ r.record.l }}</td>
+<td>{{ "%.3f"|format(r.record.pct) }}</td><td>{{ format_gb(r.gb) }}</td>
+<td>{{ r.record.rs }}</td><td>{{ r.record.ra }}</td><td>{{ "%+d"|format(r.record.diff) }}</td>
+<td>{{ r.record.home_w }}-{{ r.record.home_l }}</td><td>{{ r.record.away_w }}-{{ r.record.away_l }}</td>
+<td>{{ r.record.last10[0] }}-{{ r.record.last10[1] }}</td><td>{{ r.record.streak }}</td></tr>
+{% endfor %}
+</table></div>
+{% endfor %}
+{% endblock %}

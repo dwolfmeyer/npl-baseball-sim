@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,6 +23,7 @@ from npl_sim.engine.defaults import DEFAULT_ENV
 from npl_sim.engine.game import simulate_game
 from npl_sim.engine.manager import AGGRESSION, BUNT_STRATEGIES, STYLES
 from npl_sim.engine.playlog import game_log
+from npl_sim.leaders import league_leaders
 from npl_sim.league import load_league_file, team_slots
 from npl_sim.playing_time import load_mlb_week
 from npl_sim.reporting import gameday
@@ -30,6 +32,7 @@ from npl_sim.rosters import eligibility
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.rosters.sources import NPL_DATABASE_URL_ENV, players_from_database, players_from_dump
+from npl_sim.season_stats import division_standings, format_gb
 from npl_sim.simweek import round_robin, sim_week
 from npl_sim.web import lineup, stats
 from npl_sim.web.store import Store, slug
@@ -37,6 +40,7 @@ from npl_sim.web.store import Store, slug
 ROSTER_DUMP_ENV = "NPL_ROSTER_DUMP"
 DEFAULT_DUMP = Path("tests/fixtures/npl_2026_test_teams.json")
 SEASON = 2026
+SEASON_START = date(SEASON, 3, 30)  # a Monday; the sim weeks of the season to date follow it
 log = logging.getLogger(__name__)
 
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -91,7 +95,8 @@ def create_app(
     store = store or Store()
     players = players if players is not None else load_players()
     elig = elig if elig is not None else eligibility.load(SEASON)
-    slots = team_slots(load_league_file().for_season(SEASON))
+    alignment = load_league_file().for_season(SEASON)
+    slots = team_slots(alignment)
     rosters: dict[str, list[NplPlayer]] = {s.team: [] for s in slots}
     for p in players:
         if p.team in rosters and p.is_active_mlb and p.mlb_id is not None:
@@ -322,6 +327,12 @@ def create_app(
                 )
             )
         names = {str(p.mlb_id): p.name for r in week_rosters.values() for p in r}
+        # Fold the week into the season to date, in date order.
+        season, weeks_played = store.load_season()
+        week_start = SEASON_START + timedelta(weeks=weeks_played)
+        for g in sorted(result.games, key=lambda g: g["day"]):
+            season.add_game(week_start + timedelta(days=g["day"] - 1), box_score(g["events"]))
+        store.save_season(season, weeks_played + 1)
         page = render_week(
             result,
             "NPL test week",
@@ -347,6 +358,68 @@ def create_app(
         if week is None:
             raise HTTPException(404, "No such week")
         return HTMLResponse(week["page"])
+
+    def season_page(request: Request, template: str, heading: str, **context):
+        season, weeks = store.load_season()
+        return TEMPLATES.TemplateResponse(
+            request,
+            template,
+            {
+                "heading": heading,
+                "weeks": weeks,
+                "games": season.games,
+                "season": season,
+                "abbr": abbr,
+                **context,
+            },
+        )
+
+    @app.get("/standings", response_class=HTMLResponse)
+    def standings_page(request: Request):
+        season, _ = store.load_season()
+        return season_page(
+            request,
+            "standings.html",
+            "Standings",
+            divisions=division_standings(season, alignment),
+            format_gb=format_gb,
+        )
+
+    @app.get("/leaders", response_class=HTMLResponse)
+    def leaders_page(request: Request):
+        season, _ = store.load_season()
+        return season_page(
+            request,
+            "leaders.html",
+            "League leaders",
+            leagues=league_leaders(season, alignment),
+        )
+
+    @app.get("/season", response_class=HTMLResponse)
+    def totals_page(request: Request, team: str = ""):
+        season, _ = store.load_season()
+        batters = sorted(
+            (b for b in season.batters.values() if not team or b.team == team),
+            key=lambda b: (-b.pa, b.name),
+        )
+        pitchers = sorted(
+            (p for p in season.pitchers.values() if not team or p.team == team),
+            key=lambda p: (-p.outs, p.name),
+        )
+        return season_page(
+            request,
+            "totals.html",
+            "Season stats",
+            batters=batters,
+            pitchers=pitchers,
+            teams=sorted(playable),
+            team=team,
+        )
+
+    @app.post("/season/reset")
+    def reset_season():
+        store.reset_season()
+        return RedirectResponse("/standings", status_code=303)
 
     @app.get("/games/{game_id}", response_class=HTMLResponse)
     def game_page(request: Request, game_id: str):

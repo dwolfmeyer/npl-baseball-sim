@@ -1,0 +1,22 @@
+{% extends "season.html" %}
+{% block body %}
+<p class="muted small">Counting stats have no minimum. Rate stats need 3.1 plate appearances (hitters) or 1 inning (pitchers) per team game so far.</p>
+{% for league, boards in leagues.items() %}
+<h2>{{ league }}</h2>
+{% for kind in ("batting", "pitching") %}
+<h3>{{ kind|capitalize }}</h3>
+<div class="grid2" style="grid-template-columns:repeat(auto-fill,minmax(250px,1fr))">
+{% for label, rows in boards[kind].items() %}
+<div><table>
+<tr><th colspan="3">{{ label }}</th></tr>
+{% for r in rows %}
+<tr><td class="muted">{{ r.rank }}</td><td>{{ r.name }} <span class="muted small">{{ abbr(r.team) }}</span></td><td>{{ r.value }}</td></tr>
+{% else %}
+<tr><td class="muted" colspan="3">none yet</td></tr>
+{% endfor %}
+</table></div>
+{% endfor %}
+</div>
+{% endfor %}
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · NPL Sim{% endblock %}
+{% block content %}
+<h1>{{ heading }}</h1>
+{% if not weeks %}
+<p class="muted">No games yet. <a href="/">Sim a week</a> and the season to date builds here.</p>
+{% else %}
+<p class="sub">After {{ weeks }} simmed {{ "week" if weeks == 1 else "weeks" }}, {{ games }} games.
+<form method="post" action="/season/reset" style="display:inline" onsubmit="return confirm('Clear the season to date?')"><button class="btn secondary small-btn" type="submit">Reset season</button></form></p>
+{% block body %}{% endblock %}
+{% endif %}
+{% endblock %}
