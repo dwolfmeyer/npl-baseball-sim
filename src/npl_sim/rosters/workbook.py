@@ -55,8 +55,9 @@ END_HEADER = "FINANCIALS"
 # is 805347 (debut 2026-05-06), found by the eligibility pull 2026-10-12.
 MLBAM_FIXES = {80537: 805347}
 
-# Tab nicknames that don't end a team name in config/league.yaml.
-TEAM_ALIASES: dict[str, str] = {}
+# Tab nicknames that don't end a team name in config/league.yaml. The workbook
+# tab for the Absolute Sickos is still "Rats #8" (new regime in 2026).
+TEAM_ALIASES: dict[str, str] = {"Rats": "Absolute Sickos"}
 
 _DIVISION = re.compile(r"(AMERICAN|NATIONAL) LEAGUE\s+(.+?) DIVISION", re.S)
 

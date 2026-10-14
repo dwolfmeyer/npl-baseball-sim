@@ -205,8 +205,12 @@ team's orders vs LHP and RHP, the rotation with each slot's plan, the pen and
 bench. The web app's "Sim a week" plays the latest week of clean data (week 27 of 2026
 once the season is in) with that week's real PA, starts and relief outs, falling back to a
 typical week when the batting and pitching tables aren't there. Each week simmed in the
-web app also adds to a season to date, shown on the Standings, Leaders and Season stats pages
-(Reset season starts over). Without `--week` each player gets a typical week at his season pace
+web app also adds to a season to date (Reset season starts over). Standings is laid out
+like mlb.com/standings: by division, wild card (two a league, set by `wild_cards` in
+`config/league.yaml`) or league, with a Standard/Expanded toggle for one-run, extra-inning,
+division, league, interleague and over/under .500 records. Stats is laid out like
+mlb.com/stats: hitting or pitching, players or teams, filters for league, team and
+qualified players, click-to-sort columns and paging. Without `--week` each player gets a typical week at his season pace
 from the eligibility data (full time when he has none). `--out` writes a week
 page with standings, a short recap per team (record, best bat and start, notable games,
 bullpen use and who covered; `reporting/recap.py`) and who sat or filled in, plus a Gameday page per game;

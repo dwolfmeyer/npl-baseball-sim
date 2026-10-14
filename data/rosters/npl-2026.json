@@ -21,7 +21,7 @@
 {"model": "npl.team", "pk": 20, "fields": {"full_name": "Nuremberg GmbH"}},
 {"model": "npl.team", "pk": 21, "fields": {"full_name": "Old Sturbridge Villagers"}},
 {"model": "npl.team", "pk": 22, "fields": {"full_name": "Quebec Quails"}},
-{"model": "npl.team", "pk": 23, "fields": {"full_name": "Rats"}},
+{"model": "npl.team", "pk": 23, "fields": {"full_name": "Absolute Sickos"}},
 {"model": "npl.team", "pk": 24, "fields": {"full_name": "Winterfell Starks"}},
 {"model": "npl.player", "pk": "680732", "fields": {"team": 9, "name": "Sean Burke", "position": "RHP", "mlb_org": "CHW", "scoresheet_id": "39", "roster_40man": true, "roster_tripleA": false, "roster_tripleA_option": false, "roster_7dayIL": false, "roster_56dayIL": false, "roster_eosIL": false, "roster_restricted": false, "roster_outrighted": false, "roster_foreign": false, "roster_retired": false, "roster_nonroster": false, "roster_doubleA": false, "roster_singleA": false}},
 {"model": "npl.player", "pk": "665795", "fields": {"team": 9, "name": "Edward Cabrera", "position": "RHP", "mlb_org": "CHC", "scoresheet_id": "1032", "roster_40man": true, "roster_tripleA": false, "roster_tripleA_option": false, "roster_7dayIL": false, "roster_56dayIL": false, "roster_eosIL": false, "roster_restricted": false, "roster_outrighted": false, "roster_foreign": false, "roster_retired": false, "roster_nonroster": false, "roster_doubleA": false, "roster_singleA": false}},

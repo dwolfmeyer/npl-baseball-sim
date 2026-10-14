@@ -13,6 +13,7 @@ import os
 import random
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -23,7 +24,6 @@ from npl_sim.engine.defaults import DEFAULT_ENV
 from npl_sim.engine.game import simulate_game
 from npl_sim.engine.manager import AGGRESSION, BUNT_STRATEGIES, STYLES
 from npl_sim.engine.playlog import game_log
-from npl_sim.leaders import league_leaders
 from npl_sim.league import load_league_file, team_slots
 from npl_sim.playing_time import load_mlb_week
 from npl_sim.reporting import gameday
@@ -32,8 +32,19 @@ from npl_sim.rosters import eligibility
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.rosters.sources import NPL_DATABASE_URL_ENV, players_from_database, players_from_dump
-from npl_sim.season_stats import division_standings, format_gb
+from npl_sim.season_stats import (
+    EXPANDED,
+    RaceRow,
+    division_standings,
+    expanded_records,
+    format_gb,
+    format_wcgb,
+    league_standings,
+    wild_card_race,
+)
 from npl_sim.simweek import round_robin, sim_week
+from npl_sim.stats_table import Query as StatsQuery
+from npl_sim.stats_table import build as build_stats_table
 from npl_sim.web import lineup, stats
 from npl_sim.web.store import Store, slug
 
@@ -326,12 +337,15 @@ def create_app(
                     }
                 )
             )
+        # Fold the week into the season to date, in date order, under full names.
         names = {str(p.mlb_id): p.name for r in week_rosters.values() for p in r}
-        # Fold the week into the season to date, in date order.
         season, weeks_played = store.load_season()
         week_start = SEASON_START + timedelta(weeks=weeks_played)
         for g in sorted(result.games, key=lambda g: g["day"]):
             season.add_game(week_start + timedelta(days=g["day"] - 1), box_score(g["events"]))
+        for totals in (season.batters, season.pitchers):
+            for pid, line in totals.items():
+                line.name = names.get(pid, line.name)
         store.save_season(season, weeks_played + 1)
         page = render_week(
             result,
@@ -374,47 +388,103 @@ def create_app(
             },
         )
 
+    team_league = {t: lg.name for lg in alignment.leagues for d in lg.divisions for t in d.teams}
+    league_names = [lg.name for lg in alignment.leagues]
+    last_seed = len(alignment.leagues[0].divisions) + alignment.wild_cards
+
     @app.get("/standings", response_class=HTMLResponse)
-    def standings_page(request: Request):
+    def standings_page(request: Request, view: str = "division", expanded: int = 0):
         season, _ = store.load_season()
+        view = view if view in ("division", "wildcard", "league") else "division"
+        race = {name: rows for name, rows in wild_card_race(season, alignment)}
+        wcgb = {r.team: r.wcgb for rows in race.values() for r in rows}
+        seed = {r.team: r.seed for rows in race.values() for r in rows}
+
+        def line(row):  # a standings row with its wild card position
+            return RaceRow(row.team, row.record, row.gb, wcgb.get(row.team), seed.get(row.team))
+
+        if view == "wildcard":
+            tables = [(f"{name} wild card", rows) for name, rows in race.items()]
+        elif view == "league":
+            tables = [
+                (f"{name} standings", [line(r) for r in rows])
+                for name, rows in league_standings(season, alignment)
+            ]
+        else:
+            tables = [
+                (f"{lg} {div}", [line(r) for r in rows])
+                for lg, div, rows in division_standings(season, alignment)
+            ]
         return season_page(
             request,
             "standings.html",
             "Standings",
-            divisions=division_standings(season, alignment),
+            view=view,
+            expanded=bool(expanded),
+            tables=tables,
+            wild_cards=alignment.wild_cards,
+            last_seed=last_seed,
+            extra=expanded_records(season, alignment) if expanded else {},
+            expanded_columns=EXPANDED,
             format_gb=format_gb,
+            format_wcgb=format_wcgb,
         )
 
-    @app.get("/leaders", response_class=HTMLResponse)
-    def leaders_page(request: Request):
+    @app.get("/stats", response_class=HTMLResponse)
+    def stats_page(
+        request: Request,
+        kind: str = "hitting",
+        group: str = "players",
+        league: str = "",
+        team: str = "",
+        qualified: int = 1,
+        sort: str = "",
+        dir: str = "",
+        page: int = 1,
+    ):
         season, _ = store.load_season()
+        query = StatsQuery(
+            kind=kind if kind in ("hitting", "pitching") else "hitting",
+            group="teams" if group == "teams" else "players",
+            league=league if league in league_names else "",
+            team=team if team in team_league else "",
+            qualified=bool(qualified),
+            sort=sort,
+            descending={"asc": False, "desc": True}.get(dir),
+            page=page,
+        )
+        table = build_stats_table(season, query, team_league)
+        params = {
+            "kind": query.kind,
+            "group": query.group,
+            "league": query.league,
+            "team": query.team,
+            "qualified": int(query.qualified),
+            "sort": sort,
+            "dir": dir,
+            "page": page,
+        }
+
+        def link(**changes) -> str:
+            merged = {k: v for k, v in {**params, **changes}.items() if v != ""}
+            return "/stats?" + urlencode(merged)
+
+        teams = sorted(t for t in team_league if not query.league or team_league[t] == query.league)
         return season_page(
             request,
-            "leaders.html",
-            "League leaders",
-            leagues=league_leaders(season, alignment),
+            "stats.html",
+            "Stats",
+            q=query,
+            table=table,
+            link=link,
+            league_names=league_names,
+            team_names=teams,
         )
 
-    @app.get("/season", response_class=HTMLResponse)
-    def totals_page(request: Request, team: str = ""):
-        season, _ = store.load_season()
-        batters = sorted(
-            (b for b in season.batters.values() if not team or b.team == team),
-            key=lambda b: (-b.pa, b.name),
-        )
-        pitchers = sorted(
-            (p for p in season.pitchers.values() if not team or p.team == team),
-            key=lambda p: (-p.outs, p.name),
-        )
-        return season_page(
-            request,
-            "totals.html",
-            "Season stats",
-            batters=batters,
-            pitchers=pitchers,
-            teams=sorted(playable),
-            team=team,
-        )
+    @app.get("/leaders")
+    @app.get("/season")
+    def old_stats_pages():
+        return RedirectResponse("/stats", status_code=307)
 
     @app.post("/season/reset")
     def reset_season():

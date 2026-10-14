@@ -9,8 +9,11 @@ from npl_sim.season_stats import (
     SeasonStats,
     TeamRecord,
     division_standings,
+    expanded_records,
     format_gb,
+    format_wcgb,
     league_standings,
+    wild_card_race,
 )
 
 
@@ -92,3 +95,81 @@ def test_standings_games_back_and_order():
     assert format_gb(0) == "-" and format_gb(2.5) == "2.5"
     leagues = league_standings(stats, alignment)
     assert len(leagues) == 2 and len(leagues[0][1]) == 12 and leagues[0][1][0].team == first
+
+
+def test_one_run_extra_inning_and_opponent_records():
+    stats, boxes = played(12)
+    a = stats.teams["A"]
+    assert a.vs["B"] == [a.w, a.l]
+    one_run = [bx for bx in boxes if abs(bx.runs["A"] - bx.runs["B"]) == 1]
+    assert sum(a.one_run) == len(one_run)
+    assert a.one_run[0] == sum(bx.runs["A"] > bx.runs["B"] for bx in one_run)
+    extras = [bx for bx in boxes if len(bx.line["A"]) > 9]
+    assert sum(a.extra) == len(extras)
+
+
+def test_records_survive_json_and_old_saves_still_load():
+    stats, _ = played(4)
+    back = SeasonStats.from_json(stats.to_json())
+    assert back.teams["A"].vs == stats.teams["A"].vs
+    assert back.teams["A"].one_run == stats.teams["A"].one_run
+    old = stats.to_json()
+    for row in old["teams"].values():  # a season saved before these fields
+        for key in ("vs", "one_run", "extra"):
+            del row[key]
+    assert SeasonStats.from_json(old).teams["A"].one_run == [0, 0]
+
+
+def test_expected_wins_follow_runs():
+    assert TeamRecord().expected_w == 0.0
+    even = TeamRecord(w=5, l=5, rs=40, ra=40)
+    assert abs(even.expected_w - 5) < 1e-9
+    strong = TeamRecord(w=5, l=5, rs=60, ra=30)
+    assert strong.expected_w > 7
+
+
+def test_wild_card_race_seeds_and_games_behind_the_cut():
+    alignment = load_league_file().for_season(2026)
+    stats = SeasonStats()
+    al = [t for lg in alignment.leagues[:1] for d in lg.divisions for t in d.teams]
+    # Teams win 12 - i games of 20, so the AL order is the listed order of `al`.
+    for i, team in enumerate(al):
+        stats.teams[team] = TeamRecord(w=20 - i, l=i, rs=100 - i, ra=50)
+    (name, rows), _ = wild_card_race(stats, alignment)
+    assert name == "AL" and len(rows) == 12
+    winners = [r for r in rows if r.wcgb is None]
+    assert len(winners) == 3 and [r.seed for r in winners] == [1, 2, 3]
+    others = rows[3:]
+    assert [r.seed for r in others[:2]] == [4, 5] and others[2].seed is None
+    cut = others[1]
+    assert cut.wcgb == 0 and others[0].wcgb < 0 and others[2].wcgb > 0
+    assert format_wcgb(cut.wcgb) == "-" and format_wcgb(None) == "-"
+    assert format_wcgb(-1.5) == "+1.5" and format_wcgb(2.0) == "2"
+    assert (
+        wild_card_race(stats, alignment.model_copy(update={"wild_cards": 0}))[0][1][3].seed is None
+    )
+
+
+def test_expanded_records_split_by_division_league_and_interleague():
+    alignment = load_league_file().for_season(2026)
+    ducks, bulldog = "Midwest Ducksnorts", "Los Angeles Bulldog"  # same division
+    kodiaks = "Chicago Kodiaks"  # same division as the Ducksnorts
+    orphans = "Chicago Orphans"  # AL Oil Can
+    ropes = "Frozen Ropes"  # NL
+    stats = SeasonStats()
+    stats.teams[ducks] = TeamRecord(
+        w=3,
+        l=3,
+        vs={bulldog: [1, 0], kodiaks: [0, 1], orphans: [1, 1], ropes: [1, 1]},
+        one_run=[2, 1],
+        extra=[1, 0],
+    )
+    stats.teams[bulldog] = TeamRecord(w=1, l=1)  # .500
+    stats.teams[kodiaks] = TeamRecord(w=2, l=0)
+    stats.teams[orphans] = TeamRecord(w=0, l=2)
+    stats.teams[ropes] = TeamRecord(w=1, l=0)
+    row = expanded_records(stats, alignment)[ducks]
+    assert row["Div"] == "1-1" and row["League"] == "1-1" and row["Inter"] == "1-1"
+    assert row["1-Run"] == "2-1" and row["Extra"] == "1-0"
+    # Bulldog (.500), Kodiaks and Ropes are at or over .500; Orphans are under.
+    assert row[">=.500"] == "2-2" and row["<.500"] == "1-1"

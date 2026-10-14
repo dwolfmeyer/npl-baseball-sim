@@ -50,6 +50,7 @@ class LeagueConfig(BaseModel):
 
 class Alignment(BaseModel):
     from_season: int
+    wild_cards: int = Field(default=2, ge=0)  # wild card spots per league
     leagues: list[LeagueConfig]
 
     @model_validator(mode="after")

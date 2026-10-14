@@ -21,16 +21,25 @@ def test_shipped_config_has_24_teams_in_six_divisions():
     assert all(league.dh for league in alignment.leagues)
 
 
-def test_test_teams_are_where_the_roster_workbook_puts_them():
-    slots = {s.team: s for s in team_slots(load_league_file().for_season(2026))}
-    assert (slots["Midwest Ducksnorts"].league, slots["Midwest Ducksnorts"].division) == (
-        "AL",
-        "Sultan of Swat",
-    )
-    assert (slots["Hill Valley McFlys"].league, slots["Hill Valley McFlys"].division) == (
-        "NL",
-        "Say Hey Kid",
-    )
+def test_test_teams_are_where_dave_put_them_for_2026_and_2027():
+    for season in (2026, 2027):
+        slots = {s.team: s for s in team_slots(load_league_file().for_season(season))}
+        assert (slots["Midwest Ducksnorts"].league, slots["Midwest Ducksnorts"].division) == (
+            "AL",
+            "Splendid Splinter",
+        )
+        assert (slots["Hill Valley McFlys"].league, slots["Hill Valley McFlys"].division) == (
+            "AL",
+            "Oil Can",
+        )
+        assert (slots["Absolute Sickos"].league, slots["Absolute Sickos"].division) == (
+            "NL",
+            "Stan The Man",
+        )
+
+
+def test_two_wild_cards_a_league_by_default():
+    assert load_league_file().for_season(2026).wild_cards == 2
 
 
 def test_duplicate_team_is_rejected(raw):
@@ -58,7 +67,7 @@ def test_realignment_picks_latest_alignment_for_season(raw):
     def div_of(season, team):
         return {s.team: s.division for s in team_slots(lf.for_season(season))}[team]
 
-    assert div_of(2027, "Asbury Park Bosses") == "Oil Can"
-    assert div_of(2028, "Asbury Park Bosses") == "Splendid Splinter"
+    assert div_of(2027, "New York Valkyries") == "Oil Can"
+    assert div_of(2028, "New York Valkyries") == "Splendid Splinter"
     with pytest.raises(LookupError):
         lf.for_season(2025)
