@@ -51,7 +51,8 @@ from npl_sim.web import lineup, stats
 from npl_sim.web.store import Store, slug
 
 ROSTER_DUMP_ENV = "NPL_ROSTER_DUMP"
-DEFAULT_DUMP = Path("tests/fixtures/npl_2026_test_teams.json")
+LEAGUE_DUMP = Path("data/rosters/npl-2026.json")  # all 24 teams, committed
+TEST_DUMP = Path("tests/fixtures/npl_2026_test_teams.json")  # Ducksnorts and McFlys only
 SEASON = 2026
 log = logging.getLogger(__name__)
 
@@ -90,7 +91,8 @@ TEMPLATES.env.globals.update(
 def load_players() -> list[NplPlayer]:
     if os.environ.get(NPL_DATABASE_URL_ENV):
         return players_from_database()
-    return players_from_dump(os.environ.get(ROSTER_DUMP_ENV) or DEFAULT_DUMP)
+    default = LEAGUE_DUMP if LEAGUE_DUMP.exists() else TEST_DUMP
+    return players_from_dump(os.environ.get(ROSTER_DUMP_ENV) or default)
 
 
 def abbr(team: str) -> str:

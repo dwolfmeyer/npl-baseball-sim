@@ -326,7 +326,7 @@ orders against right- and left-handed starters (with DH), a five-man rotation
 and bullpen roles, checked against the roster as you edit. "Sim a game" plays
 two teams' saved cards and shows the Gameday box score and play-by-play.
 Rosters come from `NPL_DATABASE_URL` when set, otherwise from a dump
-(`NPL_ROSTER_DUMP`, default the current Ducksnorts and McFlys MLB rosters).
+(`NPL_ROSTER_DUMP`, default `data/rosters/npl-2026.json`, all 24 teams; the Ducksnorts and McFlys test fixture if that file is missing).
 Drag rows to reorder a batting order, or drag a bench player onto a row. Each
 starter has a pitch limit, a times-through-the-order hook, and an optional
 opener and piggyback; situational defense is a set of checkboxes.

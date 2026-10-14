@@ -593,3 +593,12 @@ def test_standings_and_stats_as_of_any_simmed_week(client):
     client.post("/season/reset")
     assert "No games yet" in client.get("/standings", params={"week": 1}).text
     assert not list((client.app_store_root / "season-weeks").glob("*.json"))
+
+
+def test_default_roster_dump_is_the_whole_league(monkeypatch):
+    from npl_sim.web.app import load_players
+
+    monkeypatch.delenv("NPL_ROSTER_DUMP", raising=False)
+    monkeypatch.delenv("NPL_DATABASE_URL", raising=False)
+    teams = {p.team for p in load_players()}
+    assert len(teams) == 24

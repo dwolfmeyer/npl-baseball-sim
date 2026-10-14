@@ -1,3 +1,5 @@
+import pytest
+
 from npl_sim.cli import main
 from npl_sim.engine.box import box_score
 from npl_sim.reporting.week import render_week, standings
@@ -5,6 +7,12 @@ from npl_sim.rosters import eligibility
 from npl_sim.simweek import round_robin, sim_week, typical_mlb_week
 from npl_sim.web import lineup
 from npl_sim.web.app import load_players
+
+
+@pytest.fixture(autouse=True)
+def test_teams(monkeypatch):
+    """These tests are written for the Ducksnorts/McFlys/Ropes fixture, not the league."""
+    monkeypatch.setenv("NPL_ROSTER_DUMP", "tests/fixtures/npl_2026_test_teams.json")
 
 
 def rosters():

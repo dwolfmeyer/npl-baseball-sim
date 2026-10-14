@@ -21,6 +21,12 @@ from npl_sim.talent.lines import stat_lines
 from npl_sim.talent.load import WeekTalent
 
 
+@pytest.fixture(autouse=True)
+def test_teams(monkeypatch):
+    """These tests are written for the Ducksnorts/McFlys/Ropes fixture, not the league."""
+    monkeypatch.setenv("NPL_ROSTER_DUMP", "tests/fixtures/npl_2026_test_teams.json")
+
+
 def test_auditing_changes_nothing():
     away, home = average_team("Away"), average_team("Home")
     trail: list = []
