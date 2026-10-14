@@ -70,3 +70,47 @@ def test_power_moves_hits_between_singles_and_extra_bases_without_changing_babip
     babip, share = hit_profile(power=0.8)
     assert abs(babip - base_babip) <= 0.001
     assert share < base_share
+
+
+# --- item 3: alignment presets act on the hit types their names say ---------------------
+
+
+def bip_rates(alignment="normal"):
+    """Per ball in play: singles, extra-base hits, all hits; and 2B+3B on grounders/liners."""
+    p = probs(alignment=alignment)
+    bip = sum(v for k, v in p.items() if ":" in k)
+    singles = total(p, "1B")
+    xbh = total(p, "2B") + total(p, "3B")
+    return {
+        "1B": singles / bip,
+        "xbh": xbh / bip,
+        "hits": (singles + xbh) / bip,
+        "gb_xbh": (p["GB:2B"] + p["GB:3B"]) / bip,
+        "lc_xbh": (p["LD:2B"] + p["LD:3B"]) / bip,
+        "gb_1b": p["GB:1B"] / bip,
+    }
+
+
+def test_no_doubles_cuts_extra_base_hits_and_gives_singles():
+    base, deep = bip_rates(), bip_rates("no_doubles")
+    assert 0.07 < 1 - deep["xbh"] / base["xbh"] < 0.13  # about 10% fewer 2B and 3B
+    assert 0.015 < deep["1B"] / base["1B"] - 1 < 0.05  # shallow flares fall in
+    assert abs(deep["hits"] - base["hits"]) < 0.003  # a trade, not a gift or a theft
+
+
+def test_guard_lines_cuts_doubles_down_the_line_and_costs_singles_up_the_middle():
+    base, guard = bip_rates(), bip_rates("guard_lines")
+    assert 0.15 < 1 - guard["gb_xbh"] / base["gb_xbh"] < 0.25  # grounders down the line
+    assert 0.02 < 1 - guard["lc_xbh"] / base["lc_xbh"] < 0.06  # liners, less so
+    assert 1 - guard["xbh"] / base["xbh"] > 0.04  # about 5% of all XBH, the old preset gave 1.3%
+    assert guard["gb_1b"] > base["gb_1b"]  # the hole between the guards opens
+    # The stated cost: hits allowed rise by a few thousandths per ball in play.
+    assert 0.0 < guard["hits"] - base["hits"] < 0.006
+
+
+def test_infield_in_and_double_play_still_move_every_grounder_hit_alike():
+    p0, p1, p2 = probs(), probs(alignment="infield_in"), probs(alignment="double_play")
+    for hit in HITS:
+        assert p1[f"GB:{hit}"] / p0[f"GB:{hit}"] == pytest.approx(1.12, rel=1e-6)
+        assert p2[f"GB:{hit}"] / p0[f"GB:{hit}"] == pytest.approx(1.03, rel=1e-6)
+    assert p1["LD:2B"] == pytest.approx(p0["LD:2B"])
