@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from statistics import NormalDist
 
 from npl_sim.engine.defaults import average_split
 from npl_sim.engine.game import Hitter, Pitcher, TeamCard
@@ -26,9 +27,17 @@ def pitcher(pid: str, throws: str = "R", limit: int = 95, scale: dict | None = N
     return Pitcher(pid, pid, throws, vs_lhb=card("L"), vs_rhb=card("R"), pitch_limit=limit)
 
 
+# Nine evenly spaced N(0,1) quantiles, in a fixed order that doesn't line speed up with the
+# batting order. Speed is a z-score and steal_odds is exp(a*z - a^2/2), which averages 1 over
+# a normal spread but only exp(-a^2/2) at z = 0: a team of all-zero speeds undershoots steals.
+_Z = NormalDist()
+SPEEDS = [_Z.inv_cdf((i + 0.5) / len(POSITIONS)) for i in (4, 1, 7, 3, 8, 0, 5, 2, 6)]
+
+
 def average_team(name: str, hands: str = "RLRLRRLRS") -> TeamCard:
     lineup = [
-        (hitter(f"{name}-{pos}", bats=h), pos) for pos, h in zip(POSITIONS, hands, strict=True)
+        (hitter(f"{name}-{pos}", bats=h, speed=z), pos)
+        for pos, h, z in zip(POSITIONS, hands, SPEEDS, strict=True)
     ]
     bullpen = [pitcher(f"{name}-RP{i}", "R" if i % 3 else "L", limit=25) for i in range(1, 8)]
     return TeamCard(name=name, lineup=lineup, starter=pitcher(f"{name}-SP"), bullpen=bullpen)

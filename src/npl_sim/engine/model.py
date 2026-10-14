@@ -19,6 +19,14 @@ BIP_TYPES = ("GB", "LD", "FB", "PU")
 HIT_TYPES = ("1B", "2B", "3B")
 
 
+# The average fatigue (0 to 1, game.GameSim._fatigue) of the pitcher in a PA. Batter,
+# pitcher and league rates are season stats, which already include tired arms at this
+# average rate, so fatigue moves a PA only by how far the pitcher is from it. Measured
+# over 1,000 average-team games; Milestone 8 should replace it with the real share of PAs
+# by pitch count and times through the order.
+LEAGUE_FATIGUE = 0.111
+
+
 @dataclass(frozen=True)
 class Rates:
     """Per-PA rates for one side of a handedness split."""
@@ -55,6 +63,9 @@ class LeagueEnv:
     hit_table: dict[str, dict[str, float]]
     # Extra-inning automatic runner and other rules are on by default.
     auto_runner: bool = True
+    # False plays every pitcher at the league-average fatigue (no effect), to check
+    # that a league of average teams reproduces these rates.
+    fatigue: bool = True
     # Base stealing in today's game: attempts per time a runner reaches first
     # (singles, walks, hit by pitch) and the share that succeed. These are
     # 2024-25 MLB levels; talent/running.py measures them from the season's
@@ -130,13 +141,25 @@ class Defense:
     catcher_arm: float = 0.0  # >0 throws out more base stealers
 
 
-# Owner alignment presets: each trades hits on one BIP type for another.
-ALIGNMENTS = {
+# Owner alignment presets: per BIP type and hit type multipliers on the league hit table.
+# infield_in and double_play move every grounder hit alike. The guard_lines and no_doubles
+# values are estimates, not measurements: the public studies give only the net cost (the THT
+# "Guarding the lines" study: about 0.5 win-expectancy points) and straight-up grounder rates
+# (75% outs, 22% singles, 2% doubles). They aim at about -5% and -10% extra-base hits.
+# Flagged for Milestone 8.
+_ALL = ("1B", "2B", "3B")
+ALIGNMENTS: dict[str, dict[str, dict[str, float]]] = {
     "normal": {},
-    "infield_in": {"GB": 1.12},  # more grounders sneak through; cuts runs at the plate
-    "double_play": {"GB": 1.03},
-    "guard_lines": {"LD": 0.97, "GB": 1.02},  # fewer doubles down the line
-    "no_doubles": {"FB": 0.95, "LD": 1.03},  # outfield deep: fewer XBH, more singles
+    "infield_in": {"GB": dict.fromkeys(_ALL, 1.12)},  # more grounders sneak through
+    "double_play": {"GB": dict.fromkeys(_ALL, 1.03)},
+    "guard_lines": {
+        "GB": {"1B": 1.025, "2B": 0.80, "3B": 0.80},
+        "LD": {"1B": 1.01, "2B": 0.96, "3B": 1.0},
+    },
+    "no_doubles": {  # outfield deep: fewer extra-base hits, more singles
+        "FB": {"1B": 1.20, "2B": 0.88, "3B": 0.80},
+        "LD": {"1B": 1.04, "2B": 0.90, "3B": 0.85},
+    },
 }
 
 
@@ -148,7 +171,7 @@ def pa_probabilities(
     throws: str,
     park: ParkFactors,
     defense: Defense,
-    fatigue: float = 0.0,
+    fatigue: float = LEAGUE_FATIGUE,
     alignment: str = "normal",
 ) -> dict[str, float]:
     """Final outcome probabilities for one PA, every adjustment applied once.
@@ -160,11 +183,10 @@ def pa_probabilities(
     league = env.split(bats, throws)
     # Platoon-aware combine against the league rate for this hand matchup.
     true = log5(batter.true_outcomes(), pitcher.true_outcomes(), league.true_outcomes())
-    # Fatigue: a tired pitcher walks more, misses fewer bats, gives up more HR.
-    if fatigue:
-        true["BB"] *= 1 + 0.5 * fatigue
-        true["HR"] *= 1 + 0.6 * fatigue
-        true["K"] *= 1 - 0.3 * fatigue
+    # Fatigue: a tired pitcher walks more, misses fewer bats, gives up more HR, and a fresh
+    # one does the opposite, relative to the league-average pitcher (see LEAGUE_FATIGUE).
+    for outcome, effect in (("BB", 0.5), ("HR", 0.6), ("K", -0.3)):
+        true[outcome] *= (1 + effect * fatigue) / (1 + effect * LEAGUE_FATIGUE)
     # Catcher framing.
     true["K"] *= 1 + defense.framing
     true["BB"] *= 1 - defense.framing
@@ -182,10 +204,21 @@ def pa_probabilities(
     for bip_type, share in bip_mix.items():
         table = env.hit_table[bip_type]
         # Defense and alignment move hit probability on this BIP type.
-        mult = defense.hit_mult.get(bip_type, 1.0) * align.get(bip_type, 1.0)
-        p1 = table["1B"] * hit_skill * park.single[bats] * mult
-        p2 = table["2B"] * hit_skill * power * park.xbh[bats] * mult
-        p3 = table["3B"] * hit_skill * power * park.xbh[bats] * mult
+        mult = defense.hit_mult.get(bip_type, 1.0)
+        a1, a2, a3 = (align.get(bip_type, {}).get(h, 1.0) for h in _ALL)
+        # Hit skill, defense and alignment set how many balls fall in. Power then splits
+        # those hits between singles and extra bases (talent/blend.py builds it as the
+        # XBH index over the hit index, so a power hitter has the same BABIP as before
+        # and more of his hits go for extra bases). The parks' factors are levels on
+        # singles and on doubles and triples, as FanGraphs and Statcast count them.
+        t1, t2, t3 = table["1B"] * a1, table["2B"] * a2, table["3B"] * a3
+        base = t1 + t2 + t3
+        hits = base * hit_skill * mult
+        xbh_table = t2 + t3
+        xbh = min(1.0, xbh_table / base * power) if base else 0.0
+        p1 = hits * (1 - xbh) * park.single[bats]
+        p2 = hits * xbh * (t2 / xbh_table if xbh_table else 0.0) * park.xbh[bats]
+        p3 = hits * xbh * (t3 / xbh_table if xbh_table else 0.0) * park.xbh[bats]
         p_hit = p1 + p2 + p3
         if p_hit > 0.95:
             p1, p2, p3 = (p * 0.95 / p_hit for p in (p1, p2, p3))

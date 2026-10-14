@@ -47,6 +47,30 @@ def average_games(games: int = 1000, seed: int = 0, env=DEFAULT_ENV) -> list[lis
     return play(average_team("Away"), average_team("Home"), games, seed, env)
 
 
+def input_rates(games: list[list[dict]], env: LeagueEnv = DEFAULT_ENV) -> dict[str, float]:
+    """K, BB, HBP and HR per PA that `env` gives the batter-pitcher handedness mix these
+    average-team games actually played: what the sim should reproduce."""
+    hands = {}
+    for team in (average_team("Away"), average_team("Home")):
+        for hitter_, _ in team.lineup:
+            hands[hitter_.id] = hitter_
+        for pitcher_ in (team.starter, *team.bullpen):
+            hands[pitcher_.id] = pitcher_
+    mix = Counter()
+    for events in games:
+        for e in events:
+            if e["type"] == "pa":
+                bat, pit = hands[e["batter"]], hands[e["pitcher"]]
+                mix[(bat.side_vs(pit.throws), pit.throws)] += 1
+    n = sum(mix.values())
+    out = dict.fromkeys(("K", "BB", "HBP", "HR"), 0.0)
+    for key, count in mix.items():
+        rates = env.split(*key)
+        for stat, value in (("K", rates.k), ("BB", rates.bb), ("HBP", rates.hbp), ("HR", rates.hr)):
+            out[stat] += value * count / n
+    return out
+
+
 # --- run environment -------------------------------------------------------------
 
 
@@ -303,7 +327,8 @@ def wasserstein(p: list[float], q: list[float]) -> float:
 # Same seeds and same engine give exactly 0. A change that only reorders
 # random draws looks like a fresh set of 1,000 games (JSD about 0.00005,
 # W1 about 0.11), inside these limits; a 15% change in home runs is caught.
-DRIFT_LIMITS = {"jsd": 0.0001, "wasserstein": 0.15}
+# Wasserstein noise between two 1,000-game seed sets runs 0.05 to 0.20; a 25% HR bump gives 0.45.
+DRIFT_LIMITS = {"jsd": 0.0001, "wasserstein": 0.25}
 
 
 def drift(base: dict, now: dict) -> dict[str, float]:

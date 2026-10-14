@@ -25,7 +25,14 @@ from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
 from npl_sim.engine.manager import Baserunning, Bunting, PinchHitting, run_value
-from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
+from npl_sim.engine.model import (
+    LEAGUE_FATIGUE,
+    Defense,
+    LeagueEnv,
+    ParkFactors,
+    Rates,
+    pa_probabilities,
+)
 
 # Mean pitches per PA by outcome.
 PITCHES = {"K": 4.8, "BB": 5.7, "HBP": 3.6, "HR": 3.5, "BIP": 3.4, "BUNT": 2.6}
@@ -232,7 +239,9 @@ class GameSim:
         # recording draws no random numbers, so results are the same either way.
         self.audit = audit
         self.rng = random.Random(seed)
-        # Play detail (fielders, counts) draws from its own stream; see detail.py.
+        # Play detail (fielders, counts, strikes) draws from its own stream and never changes
+        # what happens in the game; see detail.py. Anything that feeds back (the pitches a
+        # steal or wild pitch comes on) draws from self.rng.
         self.detail_rng = random.Random(seed * 7919 + 17)
         self.park = home.park or ParkFactors()
         self.sides = {"away": _Side(away), "home": _Side(home)}
@@ -259,7 +268,7 @@ class GameSim:
         PA: the batter at the plate and the pitch it came on (a balk comes
         before the next pitch, so it adds none)."""
         if pitched:
-            self._pa_pitches += 1 + (self.detail_rng.random() < 0.4)
+            self._pa_pitches += 1 + (self.rng.random() < 0.4)
         batter = self._batting().lineup[self._batting().slot][0]
         return {"batter": batter.id, "pitch": self._pa_pitches}
 
@@ -632,6 +641,8 @@ class GameSim:
         )
 
     def _fatigue(self, defense: _Side) -> float:
+        if not self.env.fatigue:
+            return LEAGUE_FATIGUE
         p = defense.pitcher
         fatigue = max(0.0, (defense.pitches - 0.8 * p.pitch_limit) / (0.5 * p.pitch_limit))
         fatigue += 0.12 * max(0, defense.batters_faced // 9 - 1)
