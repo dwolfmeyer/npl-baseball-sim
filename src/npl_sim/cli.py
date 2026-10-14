@@ -330,7 +330,7 @@ def _calibrate(args: argparse.Namespace) -> int:
 
 def _sim_week(args: argparse.Namespace) -> int:
     from npl_sim.engine.box import box_score
-    from npl_sim.playing_time import load_mlb_week
+    from npl_sim.playing_time import load_mlb_week, load_real_week_stats
     from npl_sim.reporting.week import standings, write_week
     from npl_sim.rosters import eligibility as elig_data
     from npl_sim.simweek import round_robin, sim_week
@@ -354,13 +354,14 @@ def _sim_week(args: argparse.Namespace) -> int:
         saved = store.load_card(t)
         cards[t] = saved or lineup.default_card(rosters[t], elig)
         print(f"{t}: {'saved lineup card' if saved else 'default lineup card (none saved)'}")
-    mlb = talent = None
+    mlb = talent = real = None
     usage = f"a typical week at each player's {args.season} pace (full time if no data)"
     ability = "league average (no --week)"
     if args.week is not None:
         from npl_sim.talent.load import load_week_talent
 
         mlb = load_mlb_week(args.clean_root, args.season, args.week)
+        real = load_real_week_stats(args.clean_root, args.season, args.week)
         usage = f"real MLB usage from {args.season} week {args.week}"
         recs = {str(p.mlb_id): elig.players.get(p.mlb_id) for r in rosters.values() for p in r}
         hands = {pid: rec.bats for pid, rec in recs.items() if rec and rec.bats}
@@ -381,7 +382,8 @@ def _sim_week(args: argparse.Namespace) -> int:
         title = f"NPL test week ({args.season}" + (f", week {args.week})" if args.week else ")")
         names = {str(p.mlb_id): p.name for r in rosters.values() for p in r}
         subtitle = f"Playing time: {usage}. Ability: {ability}. Seed {args.seed}."
-        index = write_week(result, args.out, title, subtitle, names)
+        label = f"MLB {args.season} week {args.week}"
+        index = write_week(result, args.out, title, subtitle, names, real, label)
         print(f"\nWrote {index}")
     if args.audit:
         from npl_sim.audit import write_audit
