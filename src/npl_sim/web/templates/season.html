@@ -5,8 +5,28 @@
 {% if not weeks %}
 <p class="muted">No games yet. <a href="/">Sim a week</a> and the season to date builds here.</p>
 {% else %}
-<p class="sub">After {{ weeks }} simmed {{ "week" if weeks == 1 else "weeks" }}, {{ games }} games.
-<form method="post" action="/season/reset" style="display:inline" onsubmit="return confirm('Clear the season to date?')"><button class="btn secondary small-btn" type="submit">Reset season</button></form></p>
+<style>
+.weekbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 6px}
+.weekbar form{display:flex;gap:8px;align-items:center;margin:0}
+.weekbar select{min-width:230px}
+.weekbar a.step{border:1px solid var(--line);border-radius:5px;padding:4px 10px;text-decoration:none;color:var(--fg)}
+.weekbar span.step{border:1px solid var(--line);border-radius:5px;padding:4px 10px;color:var(--muted);opacity:.5}
+.weekbar a.step:hover{background:var(--panel)}
+</style>
+<div class="weekbar">
+{% if nav.prev %}<a class="step" href="{{ nav.prev }}" title="Previous week">&larr;</a>{% else %}<span class="step">&larr;</span>{% endif %}
+<form method="get">
+{% for k, v in nav.carried.items() %}{% if k != "week" %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+<select name="week" aria-label="Week" onchange="this.form.submit()">
+{% for n, label, ok in nav.options %}<option value="{{ n }}"{% if n == nav.shown %} selected{% endif %}{% if not ok %} disabled{% endif %}>{{ label }}{% if not ok %} (not simmed){% endif %}</option>{% endfor %}
+</select>
+<noscript><button class="btn small-btn" type="submit">Go</button></noscript>
+</form>
+{% if nav.next %}<a class="step" href="{{ nav.next }}" title="Next week">&rarr;</a>{% else %}<span class="step">&rarr;</span>{% endif %}
+{% if nav.latest_url %}<a href="{{ nav.latest_url }}">Latest (week {{ nav.latest }})</a>{% endif %}
+</div>
+<p class="sub">Through week {{ nav.shown }} ({{ nav.dates }}), {{ games }} games.
+{% if nav.shown == nav.latest %}<form method="post" action="/season/reset" style="display:inline" onsubmit="return confirm('Clear the season to date?')"><button class="btn secondary small-btn" type="submit">Reset season</button></form>{% endif %}</p>
 {% block body %}{% endblock %}
 {% endif %}
 {% endblock %}

@@ -509,13 +509,14 @@ def test_season_pages_build_up_week_by_week(client):
         assert "No games yet" in client.get(page).text
     client.post("/weeks", data={"seed": "11"})
     standings = client.get("/standings").text
-    assert "Reset season" in standings and "After 1 simmed week, 6 games" in standings
+    assert "Reset season" in standings
+    assert "Through week 1 (Mar 23 \u2013 Mar 29), 6 games" in standings
     for team in (DUCKS, MCFLYS, ROPES):
         assert team in standings
     assert "AL Oil Can" in standings and "NL Stan The Man" in standings
     assert "1-Run" not in standings  # the expanded columns are behind the toggle
     client.post("/weeks", data={"seed": "12"})
-    assert "After 2 simmed weeks, 12 games" in client.get("/standings").text
+    assert "Through week 2 (Mar 30 \u2013 Apr 5), 12 games" in client.get("/standings").text
     # Old links land on the stats page.
     for old in ("/leaders", "/season"):
         assert client.get(old, follow_redirects=False).headers["location"] == "/stats"
@@ -549,3 +550,46 @@ def test_stats_page_filters_sorts_and_pages(client):
     assert client.get("/stats", params={"league": "NL", "qualified": 0}).status_code == 200
     # An unknown column or page falls back instead of failing.
     assert client.get("/stats", params={"sort": "nope", "page": 99}).status_code == 200
+
+
+def test_standings_and_stats_as_of_any_simmed_week(client):
+    for seed in (11, 12, 13):
+        client.post("/weeks", data={"seed": str(seed)})
+
+    def record(html: str) -> str:
+        row = html.split(f"</span>{DUCKS}</td>")[1].split("</tr>")[0]
+        cells = row.replace("<td>", "").split("</td>")[:2]
+        return "-".join(cells)
+
+    latest = client.get("/standings").text
+    wk1 = client.get("/standings", params={"week": 1}).text
+    wk2 = client.get("/standings", params={"week": 2}).text
+    assert "Through week 3 (Apr 6 \u2013 Apr 12), 18 games" in latest
+    assert "Through week 1 (Mar 23 \u2013 Mar 29), 6 games" in wk1
+    assert "Through week 2 (Mar 30 \u2013 Apr 5), 12 games" in wk2
+    # Each week holds the games to date, so the wins and losses add up to its games.
+    for html, games in ((wk1, 6), (wk2, 12), (latest, 18)):
+        won, lost = map(int, record(html).split("-"))
+        assert won + lost <= games
+    assert "Through week 3" in client.get("/standings", params={"week": 3}).text
+    # Weeks not simmed, and nonsense, show the latest; the picker lists all 27 real weeks.
+    assert "Through week 3" in client.get("/standings", params={"week": 9}).text
+    assert "Through week 3" in client.get("/standings", params={"week": -4}).text
+    assert latest.count("<option value=") == 27 and "Week 27 \u00b7 Sep 21 \u2013 Sep 27" in latest
+    assert "Week 9 \u00b7 May 18 \u2013 May 24</option>" not in latest  # greyed out, not simmed
+    assert "(not simmed)" in latest
+    # Step links keep the view, and only the latest week offers Reset and "Latest".
+    wk2_exp = client.get("/standings", params={"week": 2, "view": "wildcard", "expanded": 1}).text
+    assert 'href="/standings?view=wildcard&amp;expanded=1&amp;week=1"' in wk2_exp
+    assert 'href="/standings?view=wildcard&amp;expanded=1&amp;week=3"' in wk2_exp
+    assert "Latest (week 3)" in wk2_exp and "Reset season" not in wk2_exp
+    assert "Reset season" in latest and "Latest (week" not in latest
+    # Stats as of a week: fewer games, and the filters and sort carry through.
+    s1 = client.get("/stats", params={"week": 1, "qualified": 0, "sort": "h"}).text
+    s3 = client.get("/stats", params={"qualified": 0, "sort": "h"}).text
+    assert "Through week 1 (Mar 23" in s1 and "week=1" in s1 and s1 != s3
+    assert 'name="week" value="1"' in s1
+    # Reset clears the cached weeks too.
+    client.post("/season/reset")
+    assert "No games yet" in client.get("/standings", params={"week": 1}).text
+    assert not list((client.app_store_root / "season-weeks").glob("*.json"))

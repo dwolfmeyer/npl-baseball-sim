@@ -74,20 +74,44 @@ class Store:
         )
         return [json.loads(p.read_text()) for p in paths[:limit]]
 
-    def load_season(self) -> tuple[SeasonStats, int]:
-        """The season to date and how many weeks it holds."""
+    def load_season(self, week: int | None = None) -> tuple[SeasonStats, int]:
+        """The season to date and how many weeks it holds. With `week`, the season as
+        it stood after that many weeks (cached when the week was simmed); a week that
+        wasn't kept falls back to the latest."""
         path = self.root / "season.json"
         if not path.exists():
             return SeasonStats(), 0
         data = json.loads(path.read_text())
-        return SeasonStats.from_json(data["stats"]), data["weeks"]
+        weeks = data["weeks"]
+        if week is not None and 1 <= week < weeks:
+            snap = self.root / "season-weeks" / f"{week:02d}.json"
+            if snap.exists():
+                return SeasonStats.from_json(json.loads(snap.read_text())), week
+        return SeasonStats.from_json(data["stats"]), weeks
 
     def save_season(self, stats: SeasonStats, weeks: int) -> None:
+        """Save the season as of week `weeks`, and keep a copy of that week's totals so the
+        standings and stats can be looked at as of any week simmed."""
+        text = json.dumps(stats.to_json())
+        (self.root / "season-weeks").mkdir(exist_ok=True)
+        (self.root / "season-weeks" / f"{weeks:02d}.json").write_text(text)
+        (self.root / "season.json").write_text(f'{{"weeks": {weeks}, "stats": {text}}}')
+
+    def season_weeks(self) -> set[int]:
+        """The weeks the season can be looked at as of."""
         path = self.root / "season.json"
-        path.write_text(json.dumps({"weeks": weeks, "stats": stats.to_json()}))
+        if not path.exists():
+            return set()
+        latest = json.loads(path.read_text())["weeks"]
+        kept = {
+            int(p.stem) for p in (self.root / "season-weeks").glob("*.json") if p.stem.isdigit()
+        }
+        return (kept | {latest}) - {0}
 
     def reset_season(self) -> None:
         (self.root / "season.json").unlink(missing_ok=True)
+        for p in (self.root / "season-weeks").glob("*.json"):
+            p.unlink()
 
     def recent_games(self, limit: int = 20) -> list[dict]:
         paths = sorted(

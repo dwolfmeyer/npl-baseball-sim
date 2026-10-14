@@ -37,7 +37,7 @@ table.mlb tr:hover td{background:var(--panel)}
 </div>
 <form method="get" class="filters">
 <input type="hidden" name="kind" value="{{ q.kind }}"><input type="hidden" name="group" value="{{ q.group }}">
-<input type="hidden" name="sort" value="{{ table.sort }}">
+<input type="hidden" name="sort" value="{{ table.sort }}">{% if carried.week %}<input type="hidden" name="week" value="{{ carried.week }}">{% endif %}
 <label>League<select name="league" onchange="this.form.submit()"><option value="">All</option>
 {% for lg in league_names %}<option{% if lg == q.league %} selected{% endif %}>{{ lg }}</option>{% endfor %}</select></label>
 {% if q.group == "players" %}
