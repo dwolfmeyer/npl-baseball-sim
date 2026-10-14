@@ -133,6 +133,11 @@ enter first, in order. Untagged pens enter in listed order. A checked opener
 (`TeamCard.opener`) goes one inning at most, even a clean one, though he can
 still come out sooner (pitch limit, hook, runs, the three-batter minimum).
 
+The week page opens its recaps column with a league block (`reporting/compare.py`): all
+teams' hitting and pitching next to the real MLB week for the same players, the sim's
+pitching split into starters, relievers and (AAA) arms (innings, share, ERA, WHIP), and the
+week's counts of bullpen games, team scores of 14 or more runs, and steals.
+
 Hard limits on every pitcher (`engine/game.py`): 120 pitches (130 for a starter
 working a no-hitter) and a reliever is pulled after allowing 7 runs. When the
 staff is used up, (AAA) arms take over instead of leaving a tired pitcher in.

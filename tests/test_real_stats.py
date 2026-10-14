@@ -82,8 +82,8 @@ def test_without_a_real_week_there_are_no_mlb_lines():
 def test_week_page_shows_sim_and_mlb_rows_under_each_recap():
     teams, result = sim()
     page = render_week(result, "Test week", real=real_for(result), real_label="MLB 2026 week 27")
-    assert page.count('<tr class="sim">') == 2 * len(teams)
-    assert page.count('<tr class="mlb">') == 2 * len(teams)
+    assert page.count('<tr class="sim">') == 2 * (len(teams) + 1)  # and the league block
+    assert page.count('<tr class="mlb">') == 2 * (len(teams) + 1)
     assert "MLB rows: the real MLB 2026 week 27 stats of the players who played" in page
     # A player the real tables don't know adds nothing rather than failing.
     assert (
