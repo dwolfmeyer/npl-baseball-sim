@@ -502,3 +502,24 @@ def test_out_of_position_defense_reaches_the_engine(client):
     # The position dropdowns no longer show the cost; the warning on save still does.
     page = client.get("/teams/midwest-ducksnorts/lineup").text
     assert "· out of pos" not in page
+
+
+def test_season_pages_build_up_week_by_week(client):
+    for page in ("/standings", "/leaders", "/season"):
+        assert "No games yet" in client.get(page).text
+    client.post("/weeks", data={"seed": "11"})
+    standings = client.get("/standings").text
+    assert "Reset season" in standings and "After 1 simmed week, 6 games" in standings
+    for team in (DUCKS, MCFLYS, ROPES):
+        assert team in standings
+    client.post("/weeks", data={"seed": "12"})
+    assert "After 2 simmed weeks, 12 games" in client.get("/standings").text
+    leaders = client.get("/leaders").text
+    assert "Batting" in leaders and "Pitching" in leaders and "ERA" in leaders
+    totals = client.get("/season").text
+    assert "<h2>Batting</h2>" in totals and "<h2>Pitching</h2>" in totals
+    only = client.get("/season", params={"team": DUCKS}).text
+    assert ">DUC<" in only and ">MCF<" not in only
+    # Reset clears it.
+    resp = client.post("/season/reset", follow_redirects=True)
+    assert "No games yet" in resp.text

@@ -1,0 +1,23 @@
+{% extends "season.html" %}
+{% block body %}
+<form method="get" class="form-row"><label>Team
+<select name="team" onchange="this.form.submit()"><option value="">All teams</option>
+{% for t in teams %}<option value="{{ t }}"{% if t == team %} selected{% endif %}>{{ t }}</option>{% endfor %}
+</select></label></form>
+<h2>Batting</h2>
+<div class="wrap"><table>
+<tr><th>Player</th><th>Team</th><th>G</th><th>PA</th><th>AB</th><th>R</th><th>H</th><th>2B</th><th>3B</th><th>HR</th><th>RBI</th><th>BB</th><th>K</th><th>SB</th><th>CS</th><th>AVG</th><th>OBP</th><th>SLG</th><th>OPS</th></tr>
+{% for b in batters %}
+<tr><td>{{ b.name }}</td><td class="muted">{{ abbr(b.team) }}</td><td>{{ b.g }}</td><td>{{ b.pa }}</td><td>{{ b.ab }}</td><td>{{ b.r }}</td><td>{{ b.h }}</td><td>{{ b.doubles }}</td><td>{{ b.triples }}</td><td>{{ b.hr }}</td><td>{{ b.rbi }}</td><td>{{ b.bb }}</td><td>{{ b.k }}</td><td>{{ b.sb }}</td><td>{{ b.cs }}</td>
+<td>{{ "%.3f"|format(b.avg) }}</td><td>{{ "%.3f"|format(b.obp) }}</td><td>{{ "%.3f"|format(b.slg) }}</td><td>{{ "%.3f"|format(b.ops) }}</td></tr>
+{% endfor %}
+</table></div>
+<h2>Pitching</h2>
+<div class="wrap"><table>
+<tr><th>Player</th><th>Team</th><th>G</th><th>GS</th><th>W</th><th>L</th><th>SV</th><th>HLD</th><th>IP</th><th>H</th><th>R</th><th>ER</th><th>BB</th><th>K</th><th>HR</th><th>ERA</th><th>WHIP</th></tr>
+{% for p in pitchers %}
+<tr><td>{{ p.name }}</td><td class="muted">{{ abbr(p.team) }}</td><td>{{ p.g }}</td><td>{{ p.gs }}</td><td>{{ p.w }}</td><td>{{ p.l }}</td><td>{{ p.sv }}</td><td>{{ p.hld }}</td><td>{{ p.ip }}</td><td>{{ p.h }}</td><td>{{ p.r }}</td><td>{{ p.er }}</td><td>{{ p.bb }}</td><td>{{ p.k }}</td><td>{{ p.hr }}</td>
+<td>{{ "%.2f"|format(p.era) }}</td><td>{{ "%.2f"|format(p.whip) }}</td></tr>
+{% endfor %}
+</table></div>
+{% endblock %}

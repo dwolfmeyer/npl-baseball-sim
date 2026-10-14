@@ -1,6 +1,8 @@
 """Where the web app keeps lineup cards and simmed games for now: JSON files
 under one directory (`NPL_WEB_DATA`, default `data/web`). The database tables
-for cards and results come with the season runner (Milestone 9)."""
+for cards and results come with the season runner (Milestone 9). The season to
+date (`season.json`) is the running `SeasonStats` of every week simmed since it
+was last reset."""
 
 from __future__ import annotations
 
@@ -10,6 +12,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+from npl_sim.season_stats import SeasonStats
 from npl_sim.web.lineup import LineupCard
 
 WEB_DATA_ENV = "NPL_WEB_DATA"
@@ -70,6 +73,21 @@ class Store:
             reverse=True,
         )
         return [json.loads(p.read_text()) for p in paths[:limit]]
+
+    def load_season(self) -> tuple[SeasonStats, int]:
+        """The season to date and how many weeks it holds."""
+        path = self.root / "season.json"
+        if not path.exists():
+            return SeasonStats(), 0
+        data = json.loads(path.read_text())
+        return SeasonStats.from_json(data["stats"]), data["weeks"]
+
+    def save_season(self, stats: SeasonStats, weeks: int) -> None:
+        path = self.root / "season.json"
+        path.write_text(json.dumps({"weeks": weeks, "stats": stats.to_json()}))
+
+    def reset_season(self) -> None:
+        (self.root / "season.json").unlink(missing_ok=True)
 
     def recent_games(self, limit: int = 20) -> list[dict]:
         paths = sorted(
