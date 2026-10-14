@@ -47,7 +47,7 @@ def test_sim_week_from_lineup_cards():
     assert sum(w for _, w, *_ in standings(result)) == 6
     page = render_week(result, "Test week")
     assert "Standings" in page
-    assert 'id="team"' in page and page.count('class="game" data-away=') == 6
+    assert 'id="team"' in page and page.count('class="game" data-i=') == 6
     for t in teams:  # every team is a filter choice
         assert f'<option value="{t}">' in page
     assert set(result.carry) == set(teams)

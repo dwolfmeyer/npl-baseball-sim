@@ -1,7 +1,7 @@
 from collections import Counter
 
 from npl_sim.engine.box import box_score
-from npl_sim.reporting.recap import Recap, _game_notes, team_recap, week_recaps
+from npl_sim.reporting.recap import Recap, _coverage, _game_notes, team_recap, week_recaps
 from npl_sim.reporting.week import render_week
 from npl_sim.rosters import eligibility
 from npl_sim.simweek import round_robin, sim_week
@@ -65,3 +65,30 @@ def test_week_page_carries_the_recaps():
     assert "<h2" in page and "Recaps" in page
     for team in teams:
         assert f"{team} went" in page
+
+
+def test_week_page_has_results_recaps_and_box_scores_in_three_columns():
+    teams, result = sim()
+    page = render_week(result, "Test week", link=lambda i: f"game-{i + 1}.html")
+    results, rest = page.split('id="c-recaps"')
+    recaps, boxes = rest.split('id="c-box"')
+    assert 'id="c-results"' in results and "Standings" in results
+    assert results.count('class="game" data-i=') == len(result.games)
+    assert recaps.count('class="recap" data-team=') == len(teams)
+    # Every game's box score is on the page, line score first, each linking its full page.
+    assert boxes.count('class="boxview"') == len(result.games)
+    assert boxes.count('<table class="line">') == len(result.games)
+    assert 'href="game-1.html">Full game page</a>' in boxes
+    # The page's own tabs stand in for the columns on a narrow screen.
+    assert page.count('<button role="tab"') == 3
+
+
+def test_coverage_names_players_who_sat_out_from_the_names_given():
+    class Moves:
+        bullpen_game = standin_pitcher = False
+        replaced = [{"out": "694728", "into": "1", "standin": False, "position": "3B"}]
+
+    lines = _coverage([{"moves": {"A": Moves}}], "A", {"694728": "Sat Out"})
+    assert lines == ["Out of playing time or covered: Sat Out."]
+    # Without a name the id shows, as before.
+    assert "694728" in _coverage([{"moves": {"A": Moves}}], "A", {})[0]

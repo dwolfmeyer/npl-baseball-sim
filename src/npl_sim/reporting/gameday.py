@@ -369,6 +369,18 @@ def game_body(box: BoxScore, log: GameLog) -> str:
 {_plays(box, log)}</div>"""
 
 
+def box_fragment(box: BoxScore) -> str:
+    """Just the line score and box score (no chart or play-by-play), the two teams stacked
+    so it fits a narrow column, for pages that show a box beside other content."""
+    notes = "".join(f"<p><b>{escape(k)}:</b> {escape(v)}</p>" for k, v in box.game_notes)
+    return (
+        _line_score(box)
+        + "".join(_batting(box, t) for t in (box.away, box.home))
+        + "".join(_pitching(box, t) for t in (box.away, box.home))
+        + f'<div class="notes">{notes}</div>'
+    )
+
+
 def render_game(box: BoxScore, log: GameLog, title: str | None = None, subtitle: str = "") -> str:
     """Full HTML page for one game."""
     title = title or f"{box.away} {box.runs[box.away]}, {box.home} {box.runs[box.home]}"
