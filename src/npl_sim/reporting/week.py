@@ -26,12 +26,15 @@ main.week{max-width:1560px}
 .game details{margin-top:6px}.game summary{color:var(--muted);font-size:12px;cursor:pointer}
 .game ul{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:12px}.game li{margin:2px 0}
 .win{font-weight:700}.lose{font-weight:400;color:var(--muted)}
-.recap{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 8px}
-.recap p{margin:3px 0}
-.col .recap table{margin:8px 0 0;table-layout:fixed}
-.col .recap th,.col .recap td{text-align:center;padding:2px 0;font-size:10px}
-.col .recap tr.mlb td{color:var(--muted)}
-.col .recap th:first-child,.col .recap td:first-child{width:42px;text-align:left;color:var(--muted);
+.recap,.league{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 8px}
+.recap p,.league p{margin:3px 0}
+.col .recap table,.col .league table{margin:8px 0 0;table-layout:fixed}
+.col .recap th,.col .recap td,.col .league th,.col .league td{text-align:center;padding:2px 0;
+font-size:10px}
+.col .recap tr.mlb td,.col .league tr.mlb td{color:var(--muted)}
+.col .league table.roles th:first-child,.col .league table.roles td:first-child{width:58px}
+.col .recap th:first-child,.col .recap td:first-child,.col .league th:first-child,
+.col .league td:first-child{width:42px;text-align:left;color:var(--muted);
 font-weight:600}
 .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px}
 .bar label{display:flex;align-items:center;gap:8px}
@@ -157,6 +160,7 @@ def render_week(
         f'<td class="num">{rs}</td><td class="num">{ra}</td></tr>'
         for t, w, lo, rs, ra in standings(result)
     )
+    from npl_sim.reporting.compare import league_compare, league_html
     from npl_sim.reporting.recap import week_recaps  # recap reads this module's helpers
 
     recaps = "".join(
@@ -168,7 +172,7 @@ def render_week(
         + "</div>"
         for team, r in week_recaps(result, names, real).items()
     )
-    compare = (
+    compare = league_html(league_compare(result, real)) + (
         f'<p class="sub">MLB rows: the real {escape(real_label)} stats of the players who played '
         "for the team in the sim week.</p>"
         if real is not None and real_label

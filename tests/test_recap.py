@@ -95,7 +95,9 @@ def test_recaps_show_team_hitting_and_pitching():
         assert pitching["ER"].isdigit() and "." in pitching["ERA"] and "." in pitching["IP"]
         assert hitting["AVG"].startswith(".") or hitting["AVG"].startswith("1")
     page = render_week(result, "Test week")
-    assert page.count(">Hitting</td>") == len(teams) and page.count(">Pitching</td>") == len(teams)
+    # one pair per team, and one for the league block
+    assert page.count(">Hitting</td>") == len(teams) + 1
+    assert page.count(">Pitching</td>") == len(teams) + 1
     assert "<th>OPS</th>" in page and "<th>WHIP</th>" in page
 
 
