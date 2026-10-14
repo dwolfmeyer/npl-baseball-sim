@@ -25,7 +25,7 @@ from npl_sim.engine.game import simulate_game
 from npl_sim.engine.manager import AGGRESSION, BUNT_STRATEGIES, STYLES
 from npl_sim.engine.playlog import game_log
 from npl_sim.league import load_league_file, team_slots
-from npl_sim.playing_time import load_mlb_week
+from npl_sim.playing_time import load_mlb_week, load_real_week_stats
 from npl_sim.reporting import gameday
 from npl_sim.reporting.week import render_week, standings
 from npl_sim.rosters import eligibility
@@ -320,10 +320,11 @@ def create_app(
         # The sample week is the latest week of clean data (week 27 of 2026 once the
         # season is in): its real PA, starts and relief outs set who can play, and
         # the talent blend above rates them. Without it, a typical week at season pace.
-        mlb, playing = None, f"a typical week at each player's {SEASON} pace"
+        mlb, real, playing = None, None, f"a typical week at each player's {SEASON} pace"
         if talents.week is not None:
             try:
                 mlb = load_mlb_week(clean_root, SEASON, talents.week)
+                real = load_real_week_stats(clean_root, SEASON, talents.week)
                 playing = f"the real MLB {SEASON} week {talents.week}"
             except Exception as exc:  # no batting/pitching tables for that week
                 log.warning("MLB week %s usage failed: %s", talents.week, exc)
@@ -368,6 +369,8 @@ def create_app(
             f"Playing time: {playing}. {ability} Seed {seed}.",
             link=lambda i: f"/games/{game_ids[i]}",
             names=names,
+            real=real,
+            real_label=f"MLB {SEASON} week {talents.week}",
         )
         page = page.replace(
             '<main class="week">',

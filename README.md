@@ -219,7 +219,8 @@ from the eligibility data (full time when he has none). `--out` writes a week
 page with standings, a short recap per team (record, best bat and start, notable games,
 bullpen use and who covered; `reporting/recap.py`) and who sat or filled in, plus a Gameday page per game.
 The week page is three columns that never scroll sideways: results (the standings), recaps (each with
-the team's hitting and pitching for the week), and the games, each opening its full box score page;
+the team's hitting and pitching for the week, with the real MLB week's line for the same players
+under it when the clean data is there), and the games, each opening its full box score page;
 a team picker filters the recaps and games, and on a phone the columns become tabs;
 `--save` adds the games to the web app. Without `--week` everyone is league
 average; with it, each player plays at his talent blend for that week.

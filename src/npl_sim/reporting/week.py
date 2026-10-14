@@ -30,7 +30,8 @@ main.week{max-width:1560px}
 .recap p{margin:3px 0}
 .col .recap table{margin:8px 0 0;table-layout:fixed}
 .col .recap th,.col .recap td{text-align:center;padding:2px 0;font-size:10px}
-.col .recap th:first-child,.col .recap td:first-child{width:48px;text-align:left;color:var(--muted);
+.col .recap tr.mlb td{color:var(--muted)}
+.col .recap th:first-child,.col .recap td:first-child{width:42px;text-align:left;color:var(--muted);
 font-weight:600}
 .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px}
 .bar label{display:flex;align-items:center;gap:8px}
@@ -123,21 +124,34 @@ def _notes(g: dict, team: str, names: dict[str, str]) -> list[str]:
     return notes
 
 
-def _stat_table(label: str, pairs: list[tuple[str, str]]) -> str:
-    if not pairs:
+def _stat_table(label: str, sim: list[tuple[str, str]], mlb: list[tuple[str, str]]) -> str:
+    """A hitting or pitching line for the week: the sim's, and the real MLB week's below it."""
+    if not sim:
         return ""
-    head = "".join(f"<th>{escape(k)}</th>" for k, _ in pairs)
-    cells = "".join(f"<td>{escape(v)}</td>" for _, v in pairs)
-    return f"<table><tr><td>{label}</td>{head}</tr><tr><td></td>{cells}</tr></table>"
+    head = "".join(f"<th>{escape(k)}</th>" for k, _ in sim)
+
+    def row(name: str, pairs: list[tuple[str, str]]) -> str:
+        cells = "".join(f"<td>{escape(v)}</td>" for _, v in pairs)
+        return f'<tr class="{name.lower()}"><td>{name}</td>{cells}</tr>'
+
+    rows = row("Sim", sim) + (row("MLB", mlb) if mlb else "")
+    return f"<table><tr><td>{label}</td>{head}</tr>{rows}</table>"
 
 
 def render_week(
-    result: WeekResult, title: str, subtitle: str = "", link=None, names: dict | None = None
+    result: WeekResult,
+    title: str,
+    subtitle: str = "",
+    link=None,
+    names: dict | None = None,
+    real=None,
+    real_label: str = "",
 ) -> str:
     """The week's page in three columns: results (the standings), recaps with each team's
     hitting and pitching, and the games, each opening its full box score page. `link(i)` gives
     the href of game i's page, or None; `names` maps player ids to names for players who
-    didn't appear in a game."""
+    didn't appear in a game. `real` (playing_time.RealStats) and `real_label` ("MLB 2026 week 27")
+    add the real week's lines under each team's sim lines."""
     table = "".join(
         f'<tr><td>{escape(t)}</td><td class="num">{w}</td><td class="num">{lo}</td>'
         f'<td class="num">{rs}</td><td class="num">{ra}</td></tr>'
@@ -149,10 +163,16 @@ def render_week(
         f'<div class="recap" data-team="{escape(team)}">'
         f"<p><strong>{escape(r.headline)}</strong></p>"
         + "".join(f"<p>{escape(line)}</p>" for line in r.lines)
-        + _stat_table("Hitting", r.hitting)
-        + _stat_table("Pitching", r.pitching)
+        + _stat_table("Hitting", r.hitting, r.mlb_hitting)
+        + _stat_table("Pitching", r.pitching, r.mlb_pitching)
         + "</div>"
-        for team, r in week_recaps(result, names).items()
+        for team, r in week_recaps(result, names, real).items()
+    )
+    compare = (
+        f'<p class="sub">MLB rows: the real {escape(real_label)} stats of the players who played '
+        "for the team in the sim week.</p>"
+        if real is not None and real_label
+        else ""
     )
     teams = sorted({t for g in result.games for t in (g["away"], g["home"])})
     options = "".join(f'<option value="{escape(t)}">{escape(t)}</option>' for t in teams)
@@ -191,14 +211,20 @@ def render_week(
 <section class="col" id="c-results"><h2>Results</h2>
 <h3>Standings</h3><table><tr><th>Team</th><th class="num">W</th><th class="num">L</th>
 <th class="num">RS</th><th class="num">RA</th></tr>{table}</table></section>
-<section class="col" id="c-recaps"><h2>Recaps</h2>{recaps}</section>
+<section class="col" id="c-recaps"><h2>Recaps</h2>{compare}{recaps}</section>
 <section class="col" id="c-games"><h2>Games</h2>{"".join(games)}</section>
 </div>
 </main><script>{FILTER_JS}</script></body></html>"""
 
 
 def write_week(
-    result: WeekResult, out: Path, title: str, subtitle: str = "", names: dict | None = None
+    result: WeekResult,
+    out: Path,
+    title: str,
+    subtitle: str = "",
+    names: dict | None = None,
+    real=None,
+    real_label: str = "",
 ) -> Path:
     """index.html plus game-N.html for each game; returns the index path."""
     out.mkdir(parents=True, exist_ok=True)
@@ -209,6 +235,14 @@ def write_week(
         (out / f"game-{i + 1}.html").write_text(page)
     index = out / "index.html"
     index.write_text(
-        render_week(result, title, subtitle, link=lambda i: f"game-{i + 1}.html", names=names)
+        render_week(
+            result,
+            title,
+            subtitle,
+            link=lambda i: f"game-{i + 1}.html",
+            names=names,
+            real=real,
+            real_label=real_label,
+        )
     )
     return index

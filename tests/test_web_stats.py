@@ -106,6 +106,8 @@ def test_sim_week_says_whether_it_used_the_talent_blend(tmp_path, monkeypatch):
     pd.DataFrame({"mlbam_id": [1], "gs": [0], "outs": [3]}).to_parquet(folder / "pitching.parquet")
     page = client.post("/weeks", data={"seed": "3"}, follow_redirects=True).text
     assert "Playing time: the real MLB 2026 week 3." in page
+    # The same week's real stats are the comparison under each recap.
+    assert "MLB rows: the real MLB 2026 week 3 stats" in page and 'class="mlb"' in page
 
 
 def default_talent():
