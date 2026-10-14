@@ -82,6 +82,7 @@ def test_sim_week_says_whether_it_used_the_talent_blend(tmp_path, monkeypatch):
     client = TestClient(app)
     page = client.post("/weeks", data={"seed": "3"}, follow_redirects=True).text
     assert "Ability: league average" in page
+    assert "Playing time: a typical week" in page
 
     seen = {}
 
@@ -96,6 +97,15 @@ def test_sim_week_says_whether_it_used_the_talent_blend(tmp_path, monkeypatch):
     page = client.post("/weeks", data={"seed": "3"}, follow_redirects=True).text
     assert "Ability: the talent blend for 2026 week 3." in page
     assert seen["week"] == 3 and seen["hands"][str(HENDERSON)] == "L"
+    # No batting or pitching tables for that week yet: still a typical week.
+    assert "Playing time: a typical week" in page
+
+    # With them, the week's real PA, starts and relief outs set who can play.
+    folder = clean / "2026" / "week-03"
+    pd.DataFrame({"mlbam_id": [HENDERSON], "pa": [20]}).to_parquet(folder / "batting.parquet")
+    pd.DataFrame({"mlbam_id": [1], "gs": [0], "outs": [3]}).to_parquet(folder / "pitching.parquet")
+    page = client.post("/weeks", data={"seed": "3"}, follow_redirects=True).text
+    assert "Playing time: the real MLB 2026 week 3." in page
 
 
 def default_talent():

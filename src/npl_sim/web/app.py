@@ -8,6 +8,7 @@ and hands come from `data/eligibility/<season>.json` (`npl-sim eligibility`).
 
 from __future__ import annotations
 
+import logging
 import os
 import random
 from pathlib import Path
@@ -22,6 +23,7 @@ from npl_sim.engine.game import simulate_game
 from npl_sim.engine.manager import AGGRESSION, BUNT_STRATEGIES, STYLES
 from npl_sim.engine.playlog import game_log
 from npl_sim.league import load_league_file, team_slots
+from npl_sim.playing_time import load_mlb_week
 from npl_sim.reporting import gameday
 from npl_sim.reporting.week import render_week, standings
 from npl_sim.rosters import eligibility
@@ -35,6 +37,7 @@ from npl_sim.web.store import Store, slug
 ROSTER_DUMP_ENV = "NPL_ROSTER_DUMP"
 DEFAULT_DUMP = Path("tests/fixtures/npl_2026_test_teams.json")
 SEASON = 2026
+log = logging.getLogger(__name__)
 
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
 TEMPLATES.env.globals.update(
@@ -283,7 +286,17 @@ def create_app(
             if talents.error
             else "Ability: league average (no clean MLB data on this machine)."
         )
-        result = sim_week(cards, week_rosters, elig, round_robin(teams), None, seed, talent=talent)
+        # The sample week is the latest week of clean data (week 27 of 2026 once the
+        # season is in): its real PA, starts and relief outs set who can play, and
+        # the talent blend above rates them. Without it, a typical week at season pace.
+        mlb, playing = None, f"a typical week at each player's {SEASON} pace"
+        if talents.week is not None:
+            try:
+                mlb = load_mlb_week(clean_root, SEASON, talents.week)
+                playing = f"the real MLB {SEASON} week {talents.week}"
+            except Exception as exc:  # no batting/pitching tables for that week
+                log.warning("MLB week %s usage failed: %s", talents.week, exc)
+        result = sim_week(cards, week_rosters, elig, round_robin(teams), mlb, seed, talent=talent)
         game_ids = []
         for g in result.games:
             events = g["events"]
@@ -312,7 +325,7 @@ def create_app(
         page = render_week(
             result,
             "NPL test week",
-            f"Playing time: a typical week at each player's {SEASON} pace. {ability} Seed {seed}.",
+            f"Playing time: {playing}. {ability} Seed {seed}.",
             link=lambda i: f"/games/{game_ids[i]}",
             names=names,
         )

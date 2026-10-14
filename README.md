@@ -196,7 +196,9 @@ reads a real week from the pipeline's clean tables.
 saved lineup cards (default cards when none are saved): two three-game series per team (Tue-Thu and
 Fri-Sun, Monday off, a different opponent each series), each
 team's orders vs LHP and RHP, the rotation with each slot's plan, the pen and
-bench. Without `--week` each player gets a typical week at his season pace
+bench. The web app's "Sim a week" plays the latest week of clean data (week 27 of 2026
+once the season is in) with that week's real PA, starts and relief outs, falling back to a
+typical week when the batting and pitching tables aren't there. Without `--week` each player gets a typical week at his season pace
 from the eligibility data (full time when he has none). `--out` writes a week
 page with standings and who sat or filled in, plus a Gameday page per game;
 `--save` adds the games to the web app. Without `--week` everyone is league
