@@ -171,3 +171,50 @@ def test_average_teams_steal_at_the_league_rate():
                 sb += e["type"] == "stolen_base"
     assert att / games / 2 == pytest.approx(0.96, rel=0.10)  # attempts per team-game
     assert sb / games / 2 == pytest.approx(0.74, rel=0.10)  # steals per team-game
+
+
+# Earned runs (item 11, rule 9.16): rebuild the inning as if the errors were outs.
+def _scoring_sim(outs, phantom):
+    from npl_sim.engine.game import GameSim, Runner
+
+    from .test_engine import AWAY, HOME
+
+    sim = GameSim(AWAY, HOME, DEFAULT_ENV, 1)
+    sim.outs = outs
+    sim._phantom_outs = phantom
+    scored: list = []
+    sim._score(Runner(AWAY.lineup[0][0], "p"), scored)
+    return scored[0]["earned"]
+
+
+def test_a_run_after_the_error_out_would_have_ended_the_inning_is_unearned():
+    assert _scoring_sim(outs=2, phantom=0) is True
+    assert _scoring_sim(outs=1, phantom=1) is True  # error out + 1 real = 2 outs, still alive
+    assert _scoring_sim(outs=1, phantom=2) is False  # two error outs + 1 real: 3 outs
+    assert _scoring_sim(outs=0, phantom=1) is True  # only 1 out so far: inning still alive
+    assert _scoring_sim(outs=2, phantom=1) is False
+
+
+def test_phantom_outs_reset_each_half_inning_and_runs_stay_unearned_once_flagged():
+    from npl_sim.engine.game import GameSim
+
+    from .test_engine import AWAY, HOME
+
+    for seed in range(100):
+        events = GameSim(AWAY, HOME, DEFAULT_ENV, seed).play()
+        errors = 0
+        key = None
+        for e in events:
+            if e["type"] == "half_end":
+                errors, key = 0, None
+            if e["type"] != "pa":
+                continue
+            k = (e["inning"], e["half"])
+            if k != key:
+                errors, key = 0, k
+            if e["result"] == "E":
+                errors += 1
+            for s in e["scored"]:
+                # outs before the play + errors so far this half (a prior E) >= 3 means unearned
+                if e["outs_before"] + e["outs"] + errors >= 3 and errors:
+                    assert not s["earned"], (seed, e)
