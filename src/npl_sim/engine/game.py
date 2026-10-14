@@ -254,6 +254,8 @@ class GameSim:
         self.inning = 1
         self.half = "top"
         self.outs = 0
+        # Outs the defense would have made but for errors this half-inning (rule 9.16).
+        self._phantom_outs = 0
         self.bases: list[Runner | None] = [None, None, None]
         self.line: dict[str, list[int]] = {"away": [], "home": []}
         self.alignment = "normal"  # the fielding team's alignment for the current PA
@@ -298,6 +300,11 @@ class GameSim:
         self._batting().runs += 1
         charged = self._fielding().charged
         charged[runner.pitcher_id] = charged.get(runner.pitcher_id, 0) + 1
+        # Rule 9.16: rebuild the inning with each error an out. A run scoring once that
+        # inning would have had three outs is unearned, whoever scored it. (Simplified: an
+        # error runner later retired on a force still counts as the one phantom out.)
+        if self.outs + self._phantom_outs >= 3:
+            runner.earned = False
         scored.append(
             {"runner": runner.hitter.id, "pitcher": runner.pitcher_id, "earned": runner.earned}
         )
@@ -507,6 +514,7 @@ class GameSim:
 
     def _half_inning(self) -> None:
         self.outs = 0
+        self._phantom_outs = 0
         self.bases = [None, None, None]
         side = self._batting()
         start_runs = side.runs
@@ -1032,6 +1040,7 @@ class GameSim:
         # A ball in play turned into an out, unless the fielder errs.
         if rng.random() < self._fielding().defense.error_rate:
             batter.earned = False
+            self._phantom_outs += 1
             self._force(batter, scored)
             return "E"
         if bip == "GB":
