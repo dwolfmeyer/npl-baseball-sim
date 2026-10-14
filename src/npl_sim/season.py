@@ -16,12 +16,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from npl_sim.engine.box import box_score
 from npl_sim.engine.defaults import DEFAULT_ENV
 from npl_sim.engine.workload import Carry, MlbWeek, WeekResult
 from npl_sim.rosters.eligibility import Eligibility
 from npl_sim.rosters.npl_app import NplPlayer
 from npl_sim.schedule.calendar import Week
 from npl_sim.schedule.packer import ScheduledSeries
+from npl_sim.season_stats import SeasonStats
 from npl_sim.simweek import sim_week, typical_mlb_week
 from npl_sim.web import lineup
 
@@ -50,6 +52,9 @@ class SeasonResult:
     games: list[GameSummary] = field(default_factory=list)
     totals: Counter = field(default_factory=Counter)  # league-wide PA outcomes and pitches
     carry: dict[str, Carry] = field(default_factory=dict)
+    stats: SeasonStats = field(
+        default_factory=SeasonStats
+    )  # season to date (record, player totals)
 
     def standings(self) -> list[tuple[str, int, int, int, int]]:
         """(team, W, L, runs scored, runs allowed), best record first."""
@@ -154,9 +159,11 @@ def summarize(result: WeekResult, week: Week, season: SeasonResult) -> None:
         events = g["events"]
         final = events[-1]
         moves = g["moves"]
+        played = week.start + timedelta(days=g["day"])
+        season.stats.add_game(played, box_score(events))
         season.games.append(
             GameSummary(
-                date=week.start + timedelta(days=g["day"]),
+                date=played,
                 away=g["away"],
                 home=g["home"],
                 runs={g["away"]: final["away"], g["home"]: final["home"]},
