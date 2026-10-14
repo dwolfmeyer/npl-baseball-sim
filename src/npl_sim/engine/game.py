@@ -239,7 +239,9 @@ class GameSim:
         # recording draws no random numbers, so results are the same either way.
         self.audit = audit
         self.rng = random.Random(seed)
-        # Play detail (fielders, counts) draws from its own stream; see detail.py.
+        # Play detail (fielders, counts, strikes) draws from its own stream and never changes
+        # what happens in the game; see detail.py. Anything that feeds back (the pitches a
+        # steal or wild pitch comes on) draws from self.rng.
         self.detail_rng = random.Random(seed * 7919 + 17)
         self.park = home.park or ParkFactors()
         self.sides = {"away": _Side(away), "home": _Side(home)}
@@ -266,7 +268,7 @@ class GameSim:
         PA: the batter at the plate and the pitch it came on (a balk comes
         before the next pitch, so it adds none)."""
         if pitched:
-            self._pa_pitches += 1 + (self.detail_rng.random() < 0.4)
+            self._pa_pitches += 1 + (self.rng.random() < 0.4)
         batter = self._batting().lineup[self._batting().slot][0]
         return {"batter": batter.id, "pitch": self._pa_pitches}
 

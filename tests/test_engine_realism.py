@@ -114,3 +114,33 @@ def test_infield_in_and_double_play_still_move_every_grounder_hit_alike():
         assert p1[f"GB:{hit}"] / p0[f"GB:{hit}"] == pytest.approx(1.12, rel=1e-6)
         assert p2[f"GB:{hit}"] / p0[f"GB:{hit}"] == pytest.approx(1.03, rel=1e-6)
     assert p1["LD:2B"] == pytest.approx(p0["LD:2B"])
+
+
+# Detail stream (item 4): fielders, counts and strikes draw from detail_rng and must never
+# change what happens in the game.
+_DETAIL_KEYS = {"fielder", "count", "strikes", "k_type", "direction", "batted_ball"}
+
+
+def _play_with_detail_seed(seed, detail_seed):
+    import random
+
+    from npl_sim.engine.game import GameSim
+
+    from .test_engine import AWAY, HOME
+
+    sim = GameSim(AWAY, HOME, DEFAULT_ENV, seed)
+    sim.detail_rng = random.Random(detail_seed)
+    return sim.play()
+
+
+def _without_detail(events):
+    return [{k: v for k, v in e.items() if k not in _DETAIL_KEYS} for e in events]
+
+
+def test_swapping_the_detail_stream_changes_no_event_or_score():
+    for seed in range(60):
+        a = _play_with_detail_seed(seed, 1)
+        b = _play_with_detail_seed(seed, 99)
+        assert a[-1] == b[-1]  # final score and line
+        assert _without_detail(a) == _without_detail(b)
+    assert a != b  # the detail itself does differ
