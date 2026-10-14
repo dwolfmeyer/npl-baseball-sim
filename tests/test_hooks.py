@@ -157,3 +157,28 @@ def test_a_reliever_is_pulled_after_seven_runs_and_a_standin_covers_an_empty_pen
                 runs[p] = runs.get(p, 0) + sum(1 for s in e["scored"] if s["pitcher"] == p)
                 saw_standin |= p.startswith("AAA-")
     assert saw_standin
+
+
+def test_standin_arms_keep_a_readable_short_name():
+    from npl_sim.engine.names import Roster
+
+    home = average_team("Home")
+    start = {
+        "type": "game_start",
+        "away": {
+            "name": "A",
+            "abbr": "AWY",
+            "lineup": [],
+            "pitchers": [{"id": "a1", "name": "Al Ace", "throws": "R"}],
+            "starter": "a1",
+        },
+        "home": {
+            "name": home.name,
+            "abbr": "HOM",
+            "lineup": [],
+            "pitchers": [{"id": f"AAA-HOM-R{i}", "name": "(AAA) P", "throws": "R"} for i in (1, 2)],
+            "starter": "AAA-HOM-R1",
+        },
+    }
+    roster = Roster([start])
+    assert roster.short["AAA-HOM-R1"] == "(AAA) P" and roster.short["a1"] == "Ace"
