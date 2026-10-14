@@ -19,6 +19,7 @@ WEEK_CSS = """
 .game .score a{color:var(--accent);font-weight:400;white-space:nowrap}
 .game ul{margin:6px 0 0;padding-left:18px;color:var(--muted)}.game li{margin:2px 0}
 .win{font-weight:700}
+.recap{border-top:1px solid var(--line);padding:6px 0}.recap p{margin:3px 0}
 .filter{margin:0 0 12px;display:flex;align-items:center;gap:8px}
 """
 
@@ -94,6 +95,14 @@ def render_week(
         f"<tr><td>{escape(t)}</td><td>{w}</td><td>{lo}</td><td>{rs}</td><td>{ra}</td></tr>"
         for t, w, lo, rs, ra in standings(result)
     )
+    from npl_sim.reporting.recap import week_recaps  # recap reads this module's helpers
+
+    recaps = "".join(
+        f'<div class="recap"><p><strong>{escape(r.headline)}</strong></p>'
+        + "".join(f"<p>{escape(line)}</p>" for line in r.lines)
+        + "</div>"
+        for r in week_recaps(result).values()
+    )
     teams = sorted({t for g in result.games for t in (g["away"], g["home"])})
     options = "".join(f'<option value="{escape(t)}">{escape(t)}</option>' for t in teams)
     games = []
@@ -118,6 +127,7 @@ def render_week(
 <h1>{escape(title)}</h1><p class="sub">{escape(subtitle)}</p>
 <h2>Standings</h2><div class="wrap"><table><tr><th>Team</th><th>W</th><th>L</th><th>RS</th>
 <th>RA</th></tr>{table}</table></div>
+<h2 style="margin-top:20px">Recaps</h2><div class="recaps">{recaps}</div>
 <h2 style="margin-top:20px">Games</h2>
 <label class="filter">Team <select id="team"><option value="">All teams</option>{options}</select>
 <span id="count" class="sub"></span></label>
