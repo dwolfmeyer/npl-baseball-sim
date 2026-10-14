@@ -10,12 +10,18 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 
 from npl_sim.engine.box import BoxScore, box_score
 from npl_sim.engine.workload import WeekResult
 from npl_sim.reporting.week import _names
+from npl_sim.season_stats import SeasonStats
+from npl_sim.stats_table import COLUMNS, cell, team_totals
 
 KEY_GAMES = 3
+# The team lines under each recap, from the stats page's columns.
+HITTING = ("avg", "obp", "slg", "ops", "r", "hr", "rbi", "sb", "bb", "k")
+PITCHING = ("era", "whip", "ip", "h", "er", "hr", "bb", "k")
 
 
 @dataclass
@@ -24,6 +30,8 @@ class Recap:
     record: tuple[int, int]
     headline: str
     lines: list[str] = field(default_factory=list)
+    hitting: list[tuple[str, str]] = field(default_factory=list)  # (label, value)
+    pitching: list[tuple[str, str]] = field(default_factory=list)
 
     def text(self) -> str:
         return "\n".join([self.headline, *self.lines])
@@ -168,6 +176,21 @@ def _bullpen_use(boxes: list[BoxScore], team: str) -> str | None:
     return text + (f"; {_plural(saves, 'save')}." if saves else ".")
 
 
+def _team_lines(team: str, boxes: list[BoxScore]) -> tuple[list, list]:
+    """The team's hitting and pitching totals for the week as (label, text) pairs."""
+    week = SeasonStats()
+    for box in boxes:
+        week.add_game(date.min, box)
+    out = []
+    for kind, keys in (("hitting", HITTING), ("pitching", PITCHING)):
+        total = next((t for t in team_totals(week, kind) if t.team == team), None)
+        by_key = {c.key: c for c in COLUMNS[kind]}
+        out.append(
+            [(by_key[k].label, cell(by_key[k], getattr(total, k))) for k in keys] if total else []
+        )
+    return out[0], out[1]
+
+
 def team_recap(team: str, games: list[dict], known: dict[str, str] | None = None) -> Recap:
     """`games` are the week's `WeekResult.games` that `team` played in; `known` maps ids to
     names for players who sat out and so aren't in any box score."""
@@ -192,7 +215,8 @@ def team_recap(team: str, games: list[dict], known: dict[str, str] | None = None
     if pen:
         lines.append(pen)
     lines += _coverage(games, team, names)
-    return Recap(team, (wins, losses), headline, lines)
+    hitting, pitching = _team_lines(team, boxes)
+    return Recap(team, (wins, losses), headline, lines, hitting, pitching)
 
 
 def week_recaps(result: WeekResult, names: dict[str, str] | None = None) -> dict[str, Recap]:

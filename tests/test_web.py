@@ -480,8 +480,8 @@ def test_sim_a_week(client):
     assert resp.status_code == 200 and "NPL test week" in resp.text and "Standings" in resp.text
     assert all(team in resp.text for team in (DUCKS, MCFLYS, ROPES))
     # Three teams: one sits each series, so six games, each with its own game page.
-    games = resp.text.count(">Full game page</a>")
-    assert games == 6 and resp.text.count('class="boxview"') == 6
+    games = resp.text.count(">Box score</a>")
+    assert games == 6 and 'class="boxview"' not in resp.text
     link = resp.text.split('href="/games/')[1].split('"')[0]
     assert "Play-by-play" in client.get(f"/games/{link}").text
     home = client.get("/").text

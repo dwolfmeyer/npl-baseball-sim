@@ -1,6 +1,6 @@
-"""A sim week as HTML in three columns (results, recaps, box scores): standings, each
-day's games with who started, who sat and who filled in, a recap per team, and the box
-score of whichever game is picked, plus a Gameday page per game (`write_week`)."""
+"""A sim week as HTML in three columns: the standings, a recap per team with its hitting
+and pitching, and each day's games with who started, who sat and who filled in, each
+opening its full box score (a Gameday page per game, `write_week`)."""
 
 from __future__ import annotations
 
@@ -10,40 +10,37 @@ from pathlib import Path
 from npl_sim.engine.box import box_score
 from npl_sim.engine.playlog import game_log
 from npl_sim.engine.workload import WeekResult
-from npl_sim.reporting.gameday import CSS, box_fragment, render_game
+from npl_sim.reporting.gameday import CSS, render_game
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 WEEK_CSS = """
 main.week{max-width:1560px}
-.game{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 8px;cursor:pointer}
-.game:hover{background:var(--panel)}.game.sel{outline:2px solid var(--accent);outline-offset:-1px}
+.game{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 8px}
+.game.go{cursor:pointer}.game.go:hover{background:var(--panel)}
 .game .score{display:flex;gap:8px;font-weight:600;align-items:baseline}
 .game .day{color:var(--muted);font-weight:400;width:32px;flex:none}
 .game .teams-line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;flex:1}
 .game .teams-line span{overflow-wrap:anywhere}.game .teams-line b{text-align:right}
+.game .box{display:block;margin:4px 0 0 40px;font-size:12px}
 .game details{margin-top:6px}.game summary{color:var(--muted);font-size:12px;cursor:pointer}
 .game ul{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:12px}.game li{margin:2px 0}
 .win{font-weight:700}.lose{font-weight:400;color:var(--muted)}
 .recap{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 8px}
 .recap p{margin:3px 0}
+.col .recap table{margin:8px 0 0;table-layout:fixed}
+.col .recap th,.col .recap td{text-align:center;padding:2px 0;font-size:10px}
+.col .recap th:first-child,.col .recap td:first-child{width:48px;text-align:left;color:var(--muted);
+font-weight:600}
 .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px}
 .bar label{display:flex;align-items:center;gap:8px}
-.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.25fr);gap:16px;
-align-items:start}
+.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
 .col{min-width:0;max-height:calc(100vh - 150px);overflow-y:auto;overflow-x:hidden;
 padding-right:4px}
 .col>h2{position:sticky;top:0;z-index:1;background:var(--bg);margin:0 0 8px;padding:4px 0;
 border-bottom:2px solid var(--line);font-size:13px;letter-spacing:.06em;text-transform:uppercase}
 .col table{table-layout:auto}.col th,.col td{white-space:normal;padding:3px 4px;font-size:12px}
 .col td.num,.col th.num{white-space:nowrap}
-.col .wrap{overflow:visible;margin-bottom:10px}.col .teams{grid-template-columns:1fr;gap:0}
-.col section{margin:0 0 14px}.col .notes{font-size:12px}
-.col .line th,.col .line td{padding:3px 2px;text-align:center}
-.col .line{table-layout:fixed}.col .line th:first-child,.col .line td:first-child{width:38px;
-text-align:left}
-.boxhead{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin:0 0 8px}
-.boxhead a{white-space:nowrap}.empty{color:var(--muted);padding:12px 0}
 .tabbar{display:none;gap:4px;margin:0 0 12px;border-bottom:1px solid var(--line)}
 .tabbar button{background:none;border:0;color:var(--muted);font:inherit;padding:8px 14px;
 cursor:pointer;border-bottom:2px solid transparent}
@@ -52,39 +49,31 @@ cursor:pointer;border-bottom:2px solid transparent}
 .tabbar{display:flex}.cols{display:block}.col{max-height:none;overflow:visible}
 .col>h2{position:static}
 .cols[data-show=results]>.col:not(#c-results),.cols[data-show=recaps]>.col:not(#c-recaps),
-.cols[data-show=box]>.col:not(#c-box){display:none}}
+.cols[data-show=games]>.col:not(#c-games){display:none}}
 """
 
 
-# Limits games and recaps to one team (the page works without JS: everything shows, and the
-# box scores open in order), and shows the box score of the clicked game.
+# Limits games and recaps to one team (the page works without JS: everything shows), and
+# sends a click on a game to its full box score page.
 FILTER_JS = """
 const sel=document.getElementById('team'),cols=document.querySelector('.cols'),
-games=[...document.querySelectorAll('.game')],recaps=[...document.querySelectorAll('.recap')],
-boxes=[...document.querySelectorAll('.boxview')],empty=document.getElementById('nobox'),
-narrow=matchMedia('(max-width:1099px)');
-function pick(i,click){for(const g of games)g.classList.toggle('sel',g.dataset.i===i);
-for(const b of boxes)b.hidden=b.dataset.i!==i;empty.hidden=i!==null;
-if(i!==null)history.replaceState(null,'','#g'+i);
-if(click&&narrow.matches)show('box');}
+games=[...document.querySelectorAll('.game')],recaps=[...document.querySelectorAll('.recap')];
 function show(c){cols.dataset.show=c;
 document.querySelectorAll('.tabbar button').forEach(
 b=>b.setAttribute('aria-selected',b.dataset.c===c));}
 document.querySelectorAll('.tabbar button').forEach(b=>b.onclick=()=>show(b.dataset.c));
-for(const g of games)g.onclick=e=>{if(!e.target.closest('summary,a'))pick(g.dataset.i,true)};
-function apply(pref){const t=sel.value;let n=0;
+for(const g of games){const a=g.querySelector('a.box');
+if(a)g.onclick=e=>{if(!e.target.closest('summary,a'))location.href=a.href};}
+function apply(){const t=sel.value;let n=0;
 for(const g of games){const on=!t||g.dataset.away===t||g.dataset.home===t;g.hidden=!on;n+=on}
 for(const r of recaps)r.hidden=!!t&&r.dataset.team!==t;
 document.getElementById('count').textContent=t?n+' of '+games.length+' games':'';
 const u=new URL(location);t?u.searchParams.set('team',t):u.searchParams.delete('team');
-history.replaceState(null,'',u);
-const cur=games.find(g=>g.classList.contains('sel')&&!g.hidden)||
-games.find(g=>g.dataset.i===pref&&!g.hidden)||games.find(g=>!g.hidden);
-pick(cur?cur.dataset.i:null,false)}
-sel.onchange=()=>apply();
+history.replaceState(null,'',u)}
+sel.onchange=apply;
 sel.value=new URLSearchParams(location.search).get('team')||'';
 if(sel.value!==(new URLSearchParams(location.search).get('team')||''))sel.value='';
-show('results');apply(location.hash.slice(2));
+show('results');apply();
 """
 
 
@@ -134,12 +123,21 @@ def _notes(g: dict, team: str, names: dict[str, str]) -> list[str]:
     return notes
 
 
+def _stat_table(label: str, pairs: list[tuple[str, str]]) -> str:
+    if not pairs:
+        return ""
+    head = "".join(f"<th>{escape(k)}</th>" for k, _ in pairs)
+    cells = "".join(f"<td>{escape(v)}</td>" for _, v in pairs)
+    return f"<table><tr><td>{label}</td>{head}</tr><tr><td></td>{cells}</tr></table>"
+
+
 def render_week(
     result: WeekResult, title: str, subtitle: str = "", link=None, names: dict | None = None
 ) -> str:
-    """The week's page in three columns: results (standings and the games), recaps, and the
-    box score of the game picked in the results. `link(i)` gives the href of game i's full
-    page, or None; `names` maps player ids to names for players who didn't appear in a game."""
+    """The week's page in three columns: results (the standings), recaps with each team's
+    hitting and pitching, and the games, each opening its full box score page. `link(i)` gives
+    the href of game i's page, or None; `names` maps player ids to names for players who
+    didn't appear in a game."""
     table = "".join(
         f'<tr><td>{escape(t)}</td><td class="num">{w}</td><td class="num">{lo}</td>'
         f'<td class="num">{rs}</td><td class="num">{ra}</td></tr>'
@@ -151,12 +149,14 @@ def render_week(
         f'<div class="recap" data-team="{escape(team)}">'
         f"<p><strong>{escape(r.headline)}</strong></p>"
         + "".join(f"<p>{escape(line)}</p>" for line in r.lines)
+        + _stat_table("Hitting", r.hitting)
+        + _stat_table("Pitching", r.pitching)
         + "</div>"
         for team, r in week_recaps(result, names).items()
     )
     teams = sorted({t for g in result.games for t in (g["away"], g["home"])})
     options = "".join(f'<option value="{escape(t)}">{escape(t)}</option>' for t in teams)
-    games, boxes = [], []
+    games = []
     for i, g in enumerate(result.games):
         final = g["events"][-1]
         who = {**(names or {}), **_names(g["events"])}
@@ -164,42 +164,35 @@ def render_week(
         day = DAY_NAMES[g["day"] % 7]
         notes = _notes(g, g["away"], who) + _notes(g, g["home"], who)
         items = "".join(f"<li>{escape(n)}</li>" for n in notes)
+        href = link(i) if link else None
+        box = f'<a class="box" href="{escape(href)}">Box score</a>' if href else ""
         games.append(
-            f'<div class="game" data-i="{i}" data-away="{escape(g["away"])}" '
+            f'<div class="game{" go" if href else ""}" data-i="{i}" '
+            f'data-away="{escape(g["away"])}" '
             f'data-home="{escape(g["home"])}"><div class="score"><span class="day">{day}</span>'
             f'<div class="teams-line"><span class="{"win" if a > h else "lose"}">'
             f'{escape(g["away"])}</span><b class="{"win" if a > h else "lose"}">{a}</b>'
             f'<span class="{"win" if h > a else "lose"}">{escape(g["home"])}</span>'
-            f'<b class="{"win" if h > a else "lose"}">{h}</b></div></div>'
+            f'<b class="{"win" if h > a else "lose"}">{h}</b></div></div>{box}'
             f"<details><summary>Lineup notes ({len(notes)})</summary><ul>{items}</ul></details>"
             "</div>"
         )
-        href = link(i) if link else None
-        page = f'<a href="{escape(href)}">Full game page</a>' if href else ""
-        boxes.append(
-            f'<div class="boxview" data-i="{i}" hidden><div class="boxhead"><strong>'
-            f"{escape(g['away'])} at {escape(g['home'])}</strong>{page}</div>"
-            f"{box_fragment(box_score(g['events']))}</div>"
-        )
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{escape(title)}</title><style>{CSS}{WEEK_CSS}</style>
-<noscript><style>.boxview[hidden]{{display:block!important}}</style></noscript></head>
+<title>{escape(title)}</title><style>{CSS}{WEEK_CSS}</style></head>
 <body><main class="week">
 <h1>{escape(title)}</h1><p class="sub">{escape(subtitle)}</p>
 <div class="bar"><label>Team <select id="team"><option value="">All teams</option>{options}
 </select></label><span id="count" class="sub"></span></div>
 <div class="tabbar" role="tablist"><button role="tab" data-c="results">Results</button>
 <button role="tab" data-c="recaps">Recaps</button>
-<button role="tab" data-c="box">Box scores</button></div>
+<button role="tab" data-c="games">Games</button></div>
 <div class="cols" data-show="results">
 <section class="col" id="c-results"><h2>Results</h2>
 <h3>Standings</h3><table><tr><th>Team</th><th class="num">W</th><th class="num">L</th>
-<th class="num">RS</th><th class="num">RA</th></tr>{table}</table>
-<h3 style="margin-top:16px">Games</h3>{"".join(games)}</section>
+<th class="num">RS</th><th class="num">RA</th></tr>{table}</table></section>
 <section class="col" id="c-recaps"><h2>Recaps</h2>{recaps}</section>
-<section class="col" id="c-box"><h2>Box scores</h2>{"".join(boxes)}
-<p id="nobox" class="empty" hidden>No games to show.</p></section>
+<section class="col" id="c-games"><h2>Games</h2>{"".join(games)}</section>
 </div>
 </main><script>{FILTER_JS}</script></body></html>"""
 
