@@ -25,7 +25,14 @@ from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
 from npl_sim.engine.manager import Baserunning, Bunting, PinchHitting, run_value
-from npl_sim.engine.model import Defense, LeagueEnv, ParkFactors, Rates, pa_probabilities
+from npl_sim.engine.model import (
+    LEAGUE_FATIGUE,
+    Defense,
+    LeagueEnv,
+    ParkFactors,
+    Rates,
+    pa_probabilities,
+)
 
 # Mean pitches per PA by outcome.
 PITCHES = {"K": 4.8, "BB": 5.7, "HBP": 3.6, "HR": 3.5, "BIP": 3.4, "BUNT": 2.6}
@@ -632,6 +639,8 @@ class GameSim:
         )
 
     def _fatigue(self, defense: _Side) -> float:
+        if not self.env.fatigue:
+            return LEAGUE_FATIGUE
         p = defense.pitcher
         fatigue = max(0.0, (defense.pitches - 0.8 * p.pitch_limit) / (0.5 * p.pitch_limit))
         fatigue += 0.12 * max(0, defense.batters_faced // 9 - 1)

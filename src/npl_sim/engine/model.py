@@ -19,6 +19,14 @@ BIP_TYPES = ("GB", "LD", "FB", "PU")
 HIT_TYPES = ("1B", "2B", "3B")
 
 
+# The average fatigue (0 to 1, game.GameSim._fatigue) of the pitcher in a PA. Batter,
+# pitcher and league rates are season stats, which already include tired arms at this
+# average rate, so fatigue moves a PA only by how far the pitcher is from it. Measured
+# over 1,000 average-team games; Milestone 8 should replace it with the real share of PAs
+# by pitch count and times through the order.
+LEAGUE_FATIGUE = 0.111
+
+
 @dataclass(frozen=True)
 class Rates:
     """Per-PA rates for one side of a handedness split."""
@@ -55,6 +63,9 @@ class LeagueEnv:
     hit_table: dict[str, dict[str, float]]
     # Extra-inning automatic runner and other rules are on by default.
     auto_runner: bool = True
+    # False plays every pitcher at the league-average fatigue (no effect), to check
+    # that a league of average teams reproduces these rates.
+    fatigue: bool = True
     # Base stealing in today's game: attempts per time a runner reaches first
     # (singles, walks, hit by pitch) and the share that succeed. These are
     # 2024-25 MLB levels; talent/running.py measures them from the season's
@@ -148,7 +159,7 @@ def pa_probabilities(
     throws: str,
     park: ParkFactors,
     defense: Defense,
-    fatigue: float = 0.0,
+    fatigue: float = LEAGUE_FATIGUE,
     alignment: str = "normal",
 ) -> dict[str, float]:
     """Final outcome probabilities for one PA, every adjustment applied once.
@@ -160,11 +171,10 @@ def pa_probabilities(
     league = env.split(bats, throws)
     # Platoon-aware combine against the league rate for this hand matchup.
     true = log5(batter.true_outcomes(), pitcher.true_outcomes(), league.true_outcomes())
-    # Fatigue: a tired pitcher walks more, misses fewer bats, gives up more HR.
-    if fatigue:
-        true["BB"] *= 1 + 0.5 * fatigue
-        true["HR"] *= 1 + 0.6 * fatigue
-        true["K"] *= 1 - 0.3 * fatigue
+    # Fatigue: a tired pitcher walks more, misses fewer bats, gives up more HR, and a fresh
+    # one does the opposite, relative to the league-average pitcher (see LEAGUE_FATIGUE).
+    for outcome, effect in (("BB", 0.5), ("HR", 0.6), ("K", -0.3)):
+        true[outcome] *= (1 + effect * fatigue) / (1 + effect * LEAGUE_FATIGUE)
     # Catcher framing.
     true["K"] *= 1 + defense.framing
     true["BB"] *= 1 - defense.framing
