@@ -1,0 +1,78 @@
+{% extends "season.html" %}
+{% block head %}
+<style>
+.mlb-tabs{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;border-bottom:2px solid var(--line);margin:8px 0 14px}
+.mlb-tabs .tabs,.mlb-tabs .toggle{display:flex;gap:2px}
+.mlb-tabs a{display:block;padding:8px 14px;color:var(--muted);text-decoration:none;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;border-bottom:3px solid transparent;margin-bottom:-2px}
+.mlb-tabs a:hover{color:var(--fg)}.mlb-tabs a.on{color:var(--fg);border-bottom-color:#d50032}
+.mlb-tabs .toggle{margin-bottom:6px;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.mlb-tabs .toggle a{padding:4px 12px;border:0;margin:0;font-size:12px}.mlb-tabs .toggle a.on{background:#041e42;color:#fff}
+form.filters{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin:0 0 14px}
+form.filters label{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+table.mlb{width:100%;border-collapse:collapse;margin-bottom:14px;font-variant-numeric:tabular-nums}
+table.mlb th{background:#041e42;color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:7px 8px;text-align:right;white-space:nowrap}
+table.mlb th a{color:#fff;text-decoration:none}table.mlb th a:hover{text-decoration:underline}
+table.mlb th.sorted{background:#d50032}
+table.mlb th.name,table.mlb td.name{text-align:left}
+table.mlb td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+table.mlb td.rk{color:var(--muted);text-align:center;width:36px}
+table.mlb td.name{font-weight:700}table.mlb td.name .t{font-weight:400;color:var(--muted);font-size:12px;margin-left:6px}
+table.mlb td.sorted{background:color-mix(in srgb,var(--accent) 9%,transparent);font-weight:700}
+table.mlb tr:hover td{background:var(--panel)}
+.wrap-x{overflow-x:auto}
+.pager{display:flex;gap:12px;align-items:center;justify-content:center;margin:6px 0 24px;font-size:13px}
+.pager .off{color:var(--muted)}
+</style>
+{% endblock %}
+{% block body %}
+<div class="mlb-tabs">
+<div class="tabs">
+<a href="{{ link(kind='hitting', sort='', dir='', page='') }}" class="{{ 'on' if q.kind == 'hitting' }}">Hitting</a>
+<a href="{{ link(kind='pitching', sort='', dir='', page='') }}" class="{{ 'on' if q.kind == 'pitching' }}">Pitching</a>
+</div>
+<div class="toggle">
+<a href="{{ link(group='players', page='') }}" class="{{ 'on' if q.group == 'players' }}">Players</a>
+<a href="{{ link(group='teams', page='', team='') }}" class="{{ 'on' if q.group == 'teams' }}">Teams</a>
+</div>
+</div>
+<form method="get" class="filters">
+<input type="hidden" name="kind" value="{{ q.kind }}"><input type="hidden" name="group" value="{{ q.group }}">
+<input type="hidden" name="sort" value="{{ table.sort }}">
+<label>League<select name="league" onchange="this.form.submit()"><option value="">All</option>
+{% for lg in league_names %}<option{% if lg == q.league %} selected{% endif %}>{{ lg }}</option>{% endfor %}</select></label>
+{% if q.group == "players" %}
+<label>Team<select name="team" onchange="this.form.submit()"><option value="">All teams</option>
+{% for t in team_names %}<option{% if t == q.team %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+<label>Show<select name="qualified" onchange="this.form.submit()">
+<option value="1"{% if q.qualified %} selected{% endif %}>Qualified</option>
+<option value="0"{% if not q.qualified %} selected{% endif %}>All players</option></select></label>
+{% endif %}
+<noscript><button class="btn small-btn" type="submit">Apply</button></noscript>
+</form>
+{% if q.group == "players" and q.qualified %}
+<p class="muted small">Qualified: {{ "3.1 plate appearances" if q.kind == "hitting" else "1 inning pitched" }} for each game the team has played. Counting stats have no minimum once you pick All players.</p>
+{% endif %}
+{% if not table.rows %}
+<p class="muted">No {{ "qualified " if q.group == "players" and q.qualified }}players match.{% if q.group == "players" and q.qualified %} <a href="{{ link(qualified='0', page='') }}">Show all players</a>.{% endif %}</p>
+{% else %}
+<div class="wrap-x"><table class="mlb">
+<tr><th>#</th><th class="name">{{ "Player" if q.group == "players" else "Team" }}</th>
+{% if q.group == "players" %}<th class="name">Team</th>{% endif %}
+{% for c in table.columns %}
+<th class="{{ 'sorted' if c.key == table.sort }}"><a href="{{ link(sort=c.key, dir=('asc' if table.descending else 'desc') if c.key == table.sort else '', page='') }}">{{ c.label }}{% if c.key == table.sort %} {{ "▼" if table.descending else "▲" }}{% endif %}</a></th>
+{% endfor %}</tr>
+{% for r in table.rows %}
+<tr><td class="rk">{{ r.rank }}</td>
+{% if q.group == "players" %}<td class="name">{{ r.name }}</td><td class="name muted">{{ abbr(r.team) }}</td>
+{% else %}<td class="name">{{ r.name }}</td>{% endif %}
+{% for c in table.columns %}<td class="{{ 'sorted' if c.key == table.sort }}">{{ r.cells[loop.index0] }}</td>{% endfor %}
+</tr>
+{% endfor %}
+</table></div>
+<div class="pager">
+{% if table.page > 1 %}<a href="{{ link(page=table.page - 1) }}">&larr; Prev</a>{% else %}<span class="off">&larr; Prev</span>{% endif %}
+<span>Page {{ table.page }} of {{ table.pages }} &middot; {{ table.total }} {{ "players" if q.group == "players" else "teams" }}</span>
+{% if table.page < table.pages %}<a href="{{ link(page=table.page + 1) }}">Next &rarr;</a>{% else %}<span class="off">Next &rarr;</span>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

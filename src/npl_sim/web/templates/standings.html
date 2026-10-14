@@ -1,15 +1,64 @@
 {% extends "season.html" %}
+{% block head %}
+<style>
+.mlb-tabs{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;border-bottom:2px solid var(--line);margin:8px 0 18px}
+.mlb-tabs .tabs,.mlb-tabs .toggle{display:flex;gap:2px}
+.mlb-tabs a{display:block;padding:8px 14px;color:var(--muted);text-decoration:none;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;border-bottom:3px solid transparent;margin-bottom:-2px}
+.mlb-tabs a:hover{color:var(--fg)}.mlb-tabs a.on{color:var(--fg);border-bottom-color:#d50032}
+.mlb-tabs .toggle{margin-bottom:6px;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.mlb-tabs .toggle a{padding:4px 12px;border:0;margin:0;font-size:12px}.mlb-tabs .toggle a.on{background:#041e42;color:#fff}
+table.mlb{width:100%;border-collapse:collapse;margin-bottom:26px;font-variant-numeric:tabular-nums}
+table.mlb caption{caption-side:top;text-align:left;font-size:18px;font-weight:800;letter-spacing:.02em;padding:0 0 6px;text-transform:uppercase}
+table.mlb th{background:#041e42;color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:7px 8px;text-align:right;white-space:nowrap}
+table.mlb th:first-child{text-align:left;width:34%}
+table.mlb td{padding:9px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+table.mlb td.team{text-align:left;font-weight:700}
+table.mlb td.team .abbr{display:inline-block;min-width:34px;margin-right:8px;padding:1px 0;text-align:center;font-size:11px;font-weight:800;color:var(--muted);border:1px solid var(--line);border-radius:3px}
+table.mlb td.team .seed{display:inline-block;width:18px;margin-right:6px;text-align:center;font-size:11px;font-weight:800;color:#fff;background:#d50032;border-radius:9px}
+table.mlb td.team .seed.none{visibility:hidden}
+table.mlb td.pct{font-weight:700}
+table.mlb td.W{color:#1b7f3b;font-weight:700}table.mlb td.L{color:#c62828;font-weight:700}
+table.mlb td.sep,table.mlb th.sep{border-left:1px solid var(--line)}
+table.mlb tr:hover td{background:var(--panel)}
+table.mlb tr.cut td{border-bottom:2px dashed #d50032}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) table.mlb td.W{color:#7bd88f}:root:not([data-theme=light]) table.mlb td.L{color:#ff8a80}}
+.wrap-x{overflow-x:auto}
+.legend{font-size:12px;color:var(--muted);margin:-8px 0 20px}
+</style>
+{% endblock %}
 {% block body %}
-{% for league, division, rows in divisions %}
-<h2>{{ league }} {{ division }}</h2>
-<div class="wrap"><table>
-<tr><th>Team</th><th>W</th><th>L</th><th>PCT</th><th>GB</th><th>RS</th><th>RA</th><th>Diff</th><th>Home</th><th>Road</th><th>L10</th><th>Strk</th></tr>
-{% for r in rows %}
-<tr><td>{{ r.team }}</td><td>{{ r.record.w }}</td><td>{{ r.record.l }}</td>
-<td>{{ "%.3f"|format(r.record.pct) }}</td><td>{{ format_gb(r.gb) }}</td>
-<td>{{ r.record.rs }}</td><td>{{ r.record.ra }}</td><td>{{ "%+d"|format(r.record.diff) }}</td>
-<td>{{ r.record.home_w }}-{{ r.record.home_l }}</td><td>{{ r.record.away_w }}-{{ r.record.away_l }}</td>
-<td>{{ r.record.last10[0] }}-{{ r.record.last10[1] }}</td><td>{{ r.record.streak }}</td></tr>
+{% macro url(view, expanded) %}/standings?view={{ view }}{% if expanded %}&amp;expanded=1{% endif %}{% endmacro %}
+<div class="mlb-tabs">
+<div class="tabs">
+{% for key, label in (("division", "Division"), ("wildcard", "Wild Card"), ("league", "League")) %}
+<a href="{{ url(key, expanded) }}" class="{{ 'on' if view == key }}">{{ label }}</a>
+{% endfor %}
+</div>
+<div class="toggle">
+<a href="{{ url(view, false) }}" class="{{ 'on' if not expanded }}">Standard</a>
+<a href="{{ url(view, true) }}" class="{{ 'on' if expanded }}">Expanded</a>
+</div>
+</div>
+{% if view != "division" %}
+<p class="legend"><span class="seed-demo" style="display:inline-block;width:18px;text-align:center;font-size:11px;font-weight:800;color:#fff;background:#d50032;border-radius:9px">1</span>
+playoff seeds: the division winners by record, then {{ wild_cards }} wild cards a league; the dashed line is the cut. WCGB is games behind the last wild card spot (+ is ahead of it).</p>
+{% endif %}
+{% for title, rows in tables %}
+<div class="wrap-x"><table class="mlb">
+<caption>{{ title }}</caption>
+<tr><th>Team</th><th>W</th><th>L</th><th>PCT</th><th>GB</th><th>WCGB</th><th>L10</th><th>STRK</th><th>RS</th><th>RA</th><th>DIFF</th><th>X-W/L</th><th>HOME</th><th>AWAY</th>
+{% if expanded %}{% for c in expanded_columns %}<th{% if loop.first %} class="sep"{% endif %}>{{ c }}</th>{% endfor %}{% endif %}</tr>
+{% for r in rows %}{% set rec = r.record %}
+<tr class="{{ 'cut' if r.seed == last_seed and view != 'division' }}">
+<td class="team">{% if view != "division" %}<span class="seed{{ '' if r.seed else ' none' }}">{{ r.seed or 0 }}</span>{% endif %}<span class="abbr">{{ abbr(r.team) }}</span>{{ r.team }}</td>
+<td>{{ rec.w }}</td><td>{{ rec.l }}</td><td class="pct">{{ ("%.3f"|format(rec.pct))|replace("0.", ".", 1) }}</td>
+<td>{{ format_gb(r.gb) }}</td><td>{{ format_wcgb(r.wcgb) }}</td>
+<td>{{ rec.last10[0] }}-{{ rec.last10[1] }}</td><td class="{{ rec.streak[0] }}">{{ rec.streak }}</td>
+<td>{{ rec.rs }}</td><td>{{ rec.ra }}</td><td>{{ "%+d"|format(rec.diff) if rec.diff else 0 }}</td>
+{% set xw = rec.expected_w|round|int %}<td>{{ xw }}-{{ rec.games - xw }}</td>
+<td>{{ rec.home_w }}-{{ rec.home_l }}</td><td>{{ rec.away_w }}-{{ rec.away_l }}</td>
+{% if expanded %}{% for c in expanded_columns %}<td{% if loop.first %} class="sep"{% endif %}>{{ extra[r.team][c] if r.team in extra else "0-0" }}</td>{% endfor %}{% endif %}
+</tr>
 {% endfor %}
 </table></div>
 {% endfor %}

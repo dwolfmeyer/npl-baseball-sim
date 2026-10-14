@@ -505,21 +505,47 @@ def test_out_of_position_defense_reaches_the_engine(client):
 
 
 def test_season_pages_build_up_week_by_week(client):
-    for page in ("/standings", "/leaders", "/season"):
+    for page in ("/standings", "/stats"):
         assert "No games yet" in client.get(page).text
     client.post("/weeks", data={"seed": "11"})
     standings = client.get("/standings").text
     assert "Reset season" in standings and "After 1 simmed week, 6 games" in standings
     for team in (DUCKS, MCFLYS, ROPES):
         assert team in standings
+    assert "AL Oil Can" in standings and "NL Stan The Man" in standings
+    assert "1-Run" not in standings  # the expanded columns are behind the toggle
     client.post("/weeks", data={"seed": "12"})
     assert "After 2 simmed weeks, 12 games" in client.get("/standings").text
-    leaders = client.get("/leaders").text
-    assert "Batting" in leaders and "Pitching" in leaders and "ERA" in leaders
-    totals = client.get("/season").text
-    assert "<h2>Batting</h2>" in totals and "<h2>Pitching</h2>" in totals
-    only = client.get("/season", params={"team": DUCKS}).text
-    assert ">DUC<" in only and ">MCF<" not in only
+    # Old links land on the stats page.
+    for old in ("/leaders", "/season"):
+        assert client.get(old, follow_redirects=False).headers["location"] == "/stats"
     # Reset clears it.
     resp = client.post("/season/reset", follow_redirects=True)
     assert "No games yet" in resp.text
+
+
+def test_standings_views_and_expanded_columns(client):
+    client.post("/weeks", data={"seed": "11"})
+    wild = client.get("/standings", params={"view": "wildcard"}).text
+    assert "AL wild card" in wild and "NL wild card" in wild and "WCGB" in wild
+    league = client.get("/standings", params={"view": "league"}).text
+    assert "AL standings" in league and league.count("<tr class=") >= 24
+    expanded = client.get("/standings", params={"view": "division", "expanded": 1}).text
+    for column in ("1-Run", "Extra", "Div", "Inter", "&gt;=.500"):
+        assert f">{column}<" in expanded
+    assert client.get("/standings", params={"view": "bogus"}).status_code == 200
+
+
+def test_stats_page_filters_sorts_and_pages(client):
+    client.post("/weeks", data={"seed": "11"})
+    page = client.get("/stats", params={"qualified": 0}).text
+    assert ">Hitting<" in page and ">AVG<" in page and "Page 1 of" in page
+    only = client.get("/stats", params={"qualified": 0, "team": DUCKS}).text
+    assert ">DUC<" in only and ">MCF<" not in only
+    pitching = client.get("/stats", params={"kind": "pitching", "qualified": 0}).text
+    assert ">ERA ▲<" in pitching and ">WHIP<" in pitching
+    teams = client.get("/stats", params={"group": "teams"}).text
+    assert DUCKS in teams and ROPES in teams
+    assert client.get("/stats", params={"league": "NL", "qualified": 0}).status_code == 200
+    # An unknown column or page falls back instead of failing.
+    assert client.get("/stats", params={"sort": "nope", "page": 99}).status_code == 200

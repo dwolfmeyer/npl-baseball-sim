@@ -31,6 +31,9 @@ class TeamRecord:
     away_w: int = 0
     away_l: int = 0
     results: list[bool] = field(default_factory=list)  # every game in order, True = win
+    one_run: list[int] = field(default_factory=lambda: [0, 0])  # [W, L] in one-run games
+    extra: list[int] = field(default_factory=lambda: [0, 0])  # [W, L] in extra innings
+    vs: dict[str, list[int]] = field(default_factory=dict)  # [W, L] against each opponent
 
     @property
     def games(self) -> int:
@@ -43,6 +46,14 @@ class TeamRecord:
     @property
     def diff(self) -> int:
         return self.rs - self.ra
+
+    @property
+    def expected_w(self) -> float:
+        """Pythagenpat wins from runs scored and allowed over the games played."""
+        if not self.rs and not self.ra:
+            return 0.0
+        exp = ((self.rs + self.ra) / self.games) ** 0.287 if self.games else 1.83
+        return self.games * self.rs**exp / (self.rs**exp + self.ra**exp)
 
     @property
     def last10(self) -> tuple[int, int]:
@@ -176,6 +187,11 @@ class SeasonStats:
                 rec.away_w += won
                 rec.away_l += not won
             rec.results.append(won)
+            rec.vs.setdefault(other, [0, 0])[not won] += 1
+            if abs(box.runs[team] - box.runs[other]) == 1:
+                rec.one_run[not won] += 1
+            if len(box.line[team]) > 9:
+                rec.extra[not won] += 1
             for pid, line in box.batting[team].items():
                 bat = self.batters.setdefault(pid, BatterTotals(name=line.name, team=team))
                 bat.team = team
@@ -221,15 +237,18 @@ class StandingsRow:
     gb: float  # games behind the leader of the group; 0 for the leader
 
 
+def _behind(a: TeamRecord, b: TeamRecord) -> float:
+    """Games `a` is behind `b` (negative when it is ahead)."""
+    return ((b.w - a.w) + (a.l - b.l)) / 2
+
+
 def _group(stats: SeasonStats, teams: list[str]) -> list[StandingsRow]:
     """`teams` ranked by winning percentage, then run differential, then name,
     with games back from the first."""
     recs = {t: stats.teams.get(t, TeamRecord()) for t in teams}
     order = sorted(teams, key=lambda t: (-recs[t].pct, -recs[t].diff, t))
     lead = recs[order[0]]
-    return [
-        StandingsRow(t, recs[t], ((lead.w - recs[t].w) + (recs[t].l - lead.l)) / 2) for t in order
-    ]
+    return [StandingsRow(t, recs[t], max(0.0, _behind(recs[t], lead))) for t in order]
 
 
 def division_standings(
@@ -255,3 +274,84 @@ def league_standings(
 
 def format_gb(gb: float) -> str:
     return "-" if gb == 0 else f"{gb:g}"
+
+
+@dataclass
+class RaceRow:
+    team: str
+    record: TeamRecord
+    gb: float  # back of the division leader
+    wcgb: float | None  # back of the last wild card spot (negative: ahead of it); None for leaders
+    seed: int | None  # playoff seed: division winners by record, then wild cards
+
+
+def _record_order(row: StandingsRow) -> tuple:
+    return (-row.record.pct, -row.record.diff, row.team)
+
+
+def wild_card_race(stats: SeasonStats, alignment: Alignment) -> list[tuple[str, list[RaceRow]]]:
+    """[(league, rows)] with the division winners first (best record first), then
+    every other team by record. `alignment.wild_cards` spots go to the best of the
+    others; `wcgb` measures each from the last of those spots."""
+    out = []
+    for league in alignment.leagues:
+        winners, others = [], []
+        for div in league.divisions:
+            rows = _group(stats, list(div.teams))
+            winners.append(rows[0])
+            others += rows[1:]
+        winners.sort(key=_record_order)
+        others.sort(key=_record_order)
+        spots = alignment.wild_cards
+        cut = others[spots - 1].record if 0 < spots <= len(others) else None
+        rows = [RaceRow(r.team, r.record, 0, None, i + 1) for i, r in enumerate(winners)]
+        for i, r in enumerate(others):
+            seed = len(winners) + i + 1 if i < spots else None
+            wcgb = _behind(r.record, cut) if cut is not None else None
+            rows.append(RaceRow(r.team, r.record, r.gb, wcgb, seed))
+        out.append((league.name, rows))
+    return out
+
+
+def format_wcgb(wcgb: float | None) -> str:
+    """ "-" for a division leader or the last wild card team, "+1.5" for a team ahead of
+    the cut, "2" for one behind it."""
+    if wcgb is None or wcgb == 0:
+        return "-"
+    return f"+{-wcgb:g}" if wcgb < 0 else f"{wcgb:g}"
+
+
+EXPANDED = ("1-Run", "Extra", "Div", "League", "Inter", ">=.500", "<.500")
+
+
+def expanded_records(stats: SeasonStats, alignment: Alignment) -> dict[str, dict[str, str]]:
+    """The expanded standings columns per team, as "W-L" text: one-run games,
+    extra innings, and the record against its own division, the rest of its league,
+    the other league, and teams now at or over and under .500."""
+    division, league = {}, {}
+    for lg in alignment.leagues:
+        for div in lg.divisions:
+            for t in div.teams:
+                division[t], league[t] = div.name, lg.name
+    out = {}
+    for team, rec in stats.teams.items():
+        sums = {k: [0, 0] for k in EXPANDED[2:]}
+        for opp, (won, lost) in rec.vs.items():
+            if opp not in league or team not in league:
+                continue
+            if league[opp] != league[team]:
+                keys = ["Inter"]
+            elif division[opp] == division[team]:
+                keys = ["Div"]
+            else:
+                keys = ["League"]
+            keys.append(">=.500" if stats.teams[opp].pct >= 0.5 else "<.500")
+            for k in keys:
+                sums[k][0] += won
+                sums[k][1] += lost
+        out[team] = {
+            "1-Run": f"{rec.one_run[0]}-{rec.one_run[1]}",
+            "Extra": f"{rec.extra[0]}-{rec.extra[1]}",
+            **{k: f"{v[0]}-{v[1]}" for k, v in sums.items()},
+        }
+    return out

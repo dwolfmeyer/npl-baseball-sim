@@ -55,7 +55,7 @@ def test_realignment_keeps_prior_season_history(session):
             select(Division.name)
             .join(TeamSeason, TeamSeason.division_id == Division.id)
             .join(Team, Team.id == TeamSeason.team_id)
-            .where(Team.name == "Asbury Park Bosses", TeamSeason.season_year == season)
+            .where(Team.name == "New York Valkyries", TeamSeason.season_year == season)
         )
 
     assert division(2026) == "Oil Can"

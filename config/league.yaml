@@ -1,30 +1,31 @@
 # NPL league alignment. Divisions are realigned every two offseasons:
 # add a new alignment block (or edit this one) rather than changing code.
-# `from_season` is the first season this alignment applies to.
+# `from_season` is the first season this alignment applies to; a block stays
+# in force until a later `from_season` replaces it.
 #
-# 2026 follows the division headers on the league's roster workbook tabs
-# (Dave, 2026-10-12). Rats (tab "Rats #8", new regime in 2026) took the
-# slot the project spec listed as Absolute Sickos. Within each division the
-# teams are in workbook tab order, so rivals default to the first two and
-# the last two; set `rivals` on a division to change that.
+# 2026/2027 is the alignment Dave set on 2026-10-14, before the next
+# realignment. Within each division the teams are in his order, so rivals
+# default to the first two and the last two; set `rivals` on a division to
+# change that. `wild_cards` is the wild card spots per league (default 2).
 alignments:
   - from_season: 2026
+    wild_cards: 2
     leagues:
       - name: AL
         dh: true
         divisions:
           - name: Oil Can
-            teams: [Asbury Park Bosses, Los Angeles Bulldog, Central City Speedsters, Brooklyn TOOTBLANs]
+            teams: [New York Valkyries, Milwaukee DockHounds, Chicago Orphans, Hill Valley McFlys]
           - name: Splendid Splinter
-            teams: [Nuremberg GmbH, Lion King, Chicago Kodiaks, Dallas Perwar]
+            teams: [Chicago Kodiaks, Midwest Ducksnorts, Los Angeles Bulldog, Asbury Park Bosses]
           - name: Sultan of Swat
-            teams: [Cheesequake Cheddar, Midwest Ducksnorts, Chicago Orphans, Winterfell Starks]
+            teams: [Dallas Perwar, Lion King, London Calling, Bad Guys]
       - name: NL
         dh: true
         divisions:
           - name: Big Train
-            teams: [Milwaukee DockHounds, Quebec Quails, Frozen Ropes, Durham Tobacconists]
+            teams: [Cheesequake Cheddar, Denver Bears, Durham Tobacconists, Quebec Quails]
           - name: Say Hey Kid
-            teams: [London Calling, Honolulu Hitmen, Hill Valley McFlys, Old Sturbridge Villagers]
+            teams: [Honolulu Hitmen, Frozen Ropes, Winterfell Starks, Old Sturbridge Villagers]
           - name: Stan The Man
-            teams: [Denver Bears, Bad Guys, Rats, New York Valkyries]
+            teams: [Central City Speedsters, Rats, Brooklyn TOOTBLANs, Nuremberg GmbH]
