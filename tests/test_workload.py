@@ -120,11 +120,27 @@ def test_games_without_a_series_id_are_unrestricted():
     assert starters_of(result) == ["Home-SP1"] * 3
 
 
-def test_bullpen_game_when_no_starter_can_go():
+def test_bullpen_game_opens_with_a_standin_when_no_reliever_started_in_mlb():
+    # A closer never starts: without an MLB starter in the pen, a (AAA) arm opens.
     usage = week(starts={f"Home-SP{i}": 0 for i in range(1, 6)})
     result = play_week(TEAMS, GAMES[:1], usage, DEFAULT_ENV, seed=3)
     moves = result.games[0]["moves"]["Home"]
-    assert moves.bullpen_game and moves.starter.startswith("Home-RP")
+    assert moves.bullpen_game and moves.starter.startswith("AAA-")
+
+
+def test_a_reliever_who_started_in_mlb_opens_a_bullpen_game_for_three_innings():
+    usage = week(starts={f"Home-SP{i}": 0 for i in range(1, 6)} | {"Home-RP2": 1})
+    for seed in range(8):
+        result = play_week(TEAMS, GAMES[:1], usage, DEFAULT_ENV, seed=seed)
+        moves = result.games[0]["moves"]["Home"]
+        assert moves.bullpen_game and moves.starter == "Home-RP2"
+        outs = sum(
+            e["outs"]
+            for e in result.games[0]["events"]
+            if e["type"] == "pa" and e["pitcher"] == "Home-RP2"
+        )
+        assert 0 < outs <= 9 + 3
+        assert result.states["Home"].starts_left["Home-RP2"] == 0
 
 
 def relief_lines(result, team_prefix="Home-RP"):

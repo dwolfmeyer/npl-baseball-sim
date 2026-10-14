@@ -117,3 +117,43 @@ def test_an_opener_can_still_be_pulled_before_he_finishes_the_inning():
             if e["type"] == "pitching_change" and e["out"] == "Home-SP" and e["inning"] == 1:
                 mid += e["outs"] < 3
     assert mid
+
+
+def pitches_by_pitcher(events, team):
+    counts = {}
+    for e in events:
+        if e["type"] == "pa" and e["team"] != team:
+            counts[e["pitcher"]] = counts.get(e["pitcher"], 0) + e["pitches"]
+    return counts
+
+
+def test_no_pitcher_goes_past_120_pitches_even_with_a_huge_limit():
+    ace = pitcher("Home-SP", limit=400, scale={"hr": 0.005, "k": 0.45, "bb": 0.03, "hit": 0.6})
+    home = replace(average_team("Home"), starter=ace, hook=NO_HOOK)
+    longest = 0
+    for seed in range(60):
+        events = simulate_game(average_team("Away"), home, DEFAULT_ENV, seed)
+        counts = pitches_by_pitcher(events, "Home")
+        longest = max(longest, *counts.values())
+        # The cap is checked before each PA, so the last one can run a few over.
+        assert all(n <= 130 for n in counts.values())
+    assert longest >= 100
+
+
+def test_a_reliever_is_pulled_after_seven_runs_and_a_standin_covers_an_empty_pen():
+    bad = {"hr": 0.15, "k": 0.05, "bb": 0.2}
+    arms = [pitcher(f"Home-RP{i}", limit=200, scale=bad) for i in range(1, 3)]
+    starter = pitcher("Home-SP", limit=3, scale=bad)
+    home = replace(average_team("Home"), starter=starter, bullpen=arms, hook=NO_HOOK)
+    saw_standin = False
+    for seed in range(40):
+        events = simulate_game(average_team("Away"), home, DEFAULT_ENV, seed)
+        runs = {}
+        for e in events:
+            if e["type"] == "pa" and e["team"] != "Home":
+                p = e["pitcher"]
+                if p != "Home-SP":
+                    assert runs.get(p, 0) < 7  # pulled before facing another batter
+                runs[p] = runs.get(p, 0) + sum(1 for s in e["scored"] if s["pitcher"] == p)
+                saw_standin |= p.startswith("AAA-")
+    assert saw_standin
