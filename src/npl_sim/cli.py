@@ -415,6 +415,7 @@ def _sim_week(args: argparse.Namespace) -> int:
 def _sim_season(args: argparse.Namespace, league_file) -> int:
     from npl_sim.rosters import eligibility as elig_data
     from npl_sim.season import default_cards, sim_season
+    from npl_sim.season_stats import division_standings, format_gb
 
     alignment = league_file.for_season(args.season)
     rosters: dict[str, list] = {}
@@ -445,13 +446,15 @@ def _sim_season(args: argparse.Namespace, league_file) -> int:
         args.seed,
         on_week=lambda w, r: print(f"Week {w.number}: {len(r.games)} games", flush=True),
     )
-    record = {t: (w, lo, rs, ra) for t, w, lo, rs, ra in result.standings()}
-    for slot_league in alignment.leagues:
-        for div in slot_league.divisions:
-            print(f"\n{slot_league.name} {div.name:<22} W   L   RS   RA")
-            for t in sorted(div.teams, key=lambda t: -record[t][0]):
-                w, lo, rs, ra = record[t]
-                print(f"  {t:<26} {w:>3} {lo:>3} {rs:>4} {ra:>4}")
+    for league_name, div_name, rows in division_standings(result.stats, alignment):
+        print(f"\n{league_name} {div_name:<22} W   L   PCT    GB   RS   RA  Home  Road  L10  Strk")
+        for row in rows:
+            r = row.record
+            print(
+                f"  {row.team:<26} {r.w:>3} {r.l:>3} {r.pct:>5.3f} {format_gb(row.gb):>5} "
+                f"{r.rs:>4} {r.ra:>4} {r.home_w:>3}-{r.home_l:<3} {r.away_w:>3}-{r.away_l:<3} "
+                f"{r.last10[0]}-{r.last10[1]:<3} {r.streak:>4}"
+            )
     t = result.totals
     pa = t["PA"]
     hits = sum(t[h] for h in ("1B", "2B", "3B", "HR"))

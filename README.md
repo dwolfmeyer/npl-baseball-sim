@@ -83,12 +83,17 @@ Plays the whole schedule week by week through `sim_week` between every
 team's default lineup card (rotation: the five arms with the most MLB
 starts; closer: most saves plus holds), carrying unused starts, the
 rotation turn and rest into the next week, then prints standings by
-division and league sanity stats: runs per game, K%, BB%, HR rate, steals,
+division (games back, run differential, home and road records, last 10, streak) and league
+sanity stats: runs per game, K%, BB%, HR rate, steals,
 extra innings, bullpen games and the shortest rest between starts. Playing
 time is each player's typical week at his season pace from the eligibility
 data, or a full-time week (about 26 PA, 6.2 starts per five-man rotation,
 3 relief innings) where it has none yet. Ability is league average until
 the weekly talent blend is wired in.
+
+Along the way it keeps season to date (`npl_sim/season_stats.py`): each team's record and every
+player's batting and pitching totals, folded in from each game's box score and saved as
+plain JSON (`SeasonStats.to_json`). Standings and, next, leaders and recaps read from it.
 
 ### Game engine
 
