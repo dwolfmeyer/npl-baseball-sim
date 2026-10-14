@@ -206,7 +206,8 @@ bench. The web app's "Sim a week" plays the latest week of clean data (week 27 o
 once the season is in) with that week's real PA, starts and relief outs, falling back to a
 typical week when the batting and pitching tables aren't there. Without `--week` each player gets a typical week at his season pace
 from the eligibility data (full time when he has none). `--out` writes a week
-page with standings and who sat or filled in, plus a Gameday page per game;
+page with standings, a short recap per team (record, best bat and start, notable games,
+bullpen use and who covered; `reporting/recap.py`) and who sat or filled in, plus a Gameday page per game;
 `--save` adds the games to the web app. Without `--week` everyone is league
 average; with it, each player plays at his talent blend for that week.
 With `--audit DIR` it also writes an audit log for checking the engine's realism: `game-NN.jsonl` per game with every
