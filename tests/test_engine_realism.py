@@ -7,6 +7,7 @@ import pytest
 
 from npl_sim.calibration import harness as h
 from npl_sim.engine.defaults import DEFAULT_ENV, average_split
+from npl_sim.engine.game import simulate_game
 from npl_sim.engine.model import LEAGUE_FATIGUE, NEUTRAL_PARK, Defense, pa_probabilities
 
 from .test_engine import HITS, probs, total
@@ -144,3 +145,29 @@ def test_swapping_the_detail_stream_changes_no_event_or_score():
         assert a[-1] == b[-1]  # final score and line
         assert _without_detail(a) == _without_detail(b)
     assert a != b  # the detail itself does differ
+
+
+# Steals (item 5): an average lineup has a spread of speeds, not nine zeros.
+def test_average_lineup_has_a_deterministic_normal_spread_of_speeds():
+    from statistics import fmean, pstdev
+
+    from .test_engine import AWAY
+
+    speeds = sorted(hit.speed for hit, _ in AWAY.lineup)
+    assert len(set(speeds)) == 9
+    assert fmean(speeds) == pytest.approx(0, abs=1e-9)
+    assert 0.9 < pstdev(speeds) < 1.05
+
+
+def test_average_teams_steal_at_the_league_rate():
+    from .test_engine import AWAY, HOME
+
+    att = sb = 0
+    games = 600
+    for seed in range(games):
+        for e in simulate_game(AWAY, HOME, DEFAULT_ENV, seed):
+            if e["type"] in ("stolen_base", "caught_stealing"):
+                att += 1
+                sb += e["type"] == "stolen_base"
+    assert att / games / 2 == pytest.approx(0.96, rel=0.10)  # attempts per team-game
+    assert sb / games / 2 == pytest.approx(0.74, rel=0.10)  # steals per team-game

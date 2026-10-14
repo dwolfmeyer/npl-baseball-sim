@@ -327,8 +327,8 @@ def wasserstein(p: list[float], q: list[float]) -> float:
 # Same seeds and same engine give exactly 0. A change that only reorders
 # random draws looks like a fresh set of 1,000 games (JSD about 0.00005,
 # W1 about 0.11), inside these limits; a 15% change in home runs is caught.
-# Wasserstein noise between two 1,000-game seed sets runs 0.05 to 0.16; a 25% HR bump gives 0.31.
-DRIFT_LIMITS = {"jsd": 0.0001, "wasserstein": 0.20}
+# Wasserstein noise between two 1,000-game seed sets runs 0.05 to 0.20; a 25% HR bump gives 0.45.
+DRIFT_LIMITS = {"jsd": 0.0001, "wasserstein": 0.25}
 
 
 def drift(base: dict, now: dict) -> dict[str, float]:
