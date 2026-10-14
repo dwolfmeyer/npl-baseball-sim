@@ -9,6 +9,8 @@ from npl_sim.calibration import harness as h
 from npl_sim.engine.defaults import DEFAULT_ENV, average_split
 from npl_sim.engine.model import LEAGUE_FATIGUE, NEUTRAL_PARK, Defense, pa_probabilities
 
+from .test_engine import HITS, probs, total
+
 # --- item 1: fatigue is centered on the league, not added on top of it -------------------
 
 
@@ -46,3 +48,25 @@ def test_fresh_arms_beat_the_league_and_tired_ones_lose_to_it():
     assert fresh[1] < league[1] < tired[1]  # walks
     assert fresh[2] < league[2] < tired[2]  # home runs
     assert stats() == league  # no fatigue given means the league average
+
+
+# --- item 2: power reallocates hits, it doesn't add them --------------------------------
+
+
+def hit_profile(**card):
+    """(BABIP, extra-base share of hits) for a hitter with `card` changes vs an average pitcher."""
+    p = probs(batter=replace(average_split("R", "R"), **card))
+    bip = sum(v for k, v in p.items() if ":" in k)
+    hits = sum(total(p, h) for h in HITS)
+    return hits / bip, (total(p, "2B") + total(p, "3B")) / hits
+
+
+def test_power_moves_hits_between_singles_and_extra_bases_without_changing_babip():
+    base_babip, base_share = hit_profile()
+    for power in (1.2, 1.5):
+        babip, share = hit_profile(power=power)
+        assert abs(babip - base_babip) <= 0.001, (power, babip, base_babip)
+        assert share > base_share
+    babip, share = hit_profile(power=0.8)
+    assert abs(babip - base_babip) <= 0.001
+    assert share < base_share

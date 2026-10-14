@@ -193,9 +193,18 @@ def pa_probabilities(
         table = env.hit_table[bip_type]
         # Defense and alignment move hit probability on this BIP type.
         mult = defense.hit_mult.get(bip_type, 1.0) * align.get(bip_type, 1.0)
-        p1 = table["1B"] * hit_skill * park.single[bats] * mult
-        p2 = table["2B"] * hit_skill * power * park.xbh[bats] * mult
-        p3 = table["3B"] * hit_skill * power * park.xbh[bats] * mult
+        # Hit skill, defense and alignment set how many balls fall in. Power then splits
+        # those hits between singles and extra bases (talent/blend.py builds it as the
+        # XBH index over the hit index, so a power hitter has the same BABIP as before
+        # and more of his hits go for extra bases). The parks' factors are levels on
+        # singles and on doubles and triples, as FanGraphs and Statcast count them.
+        base = table["1B"] + table["2B"] + table["3B"]
+        hits = base * hit_skill * mult
+        xbh_table = table["2B"] + table["3B"]
+        xbh = min(1.0, xbh_table / base * power) if base else 0.0
+        p1 = hits * (1 - xbh) * park.single[bats]
+        p2 = hits * xbh * (table["2B"] / xbh_table if xbh_table else 0.0) * park.xbh[bats]
+        p3 = hits * xbh * (table["3B"] / xbh_table if xbh_table else 0.0) * park.xbh[bats]
         p_hit = p1 + p2 + p3
         if p_hit > 0.95:
             p1, p2, p3 = (p * 0.95 / p_hit for p in (p1, p2, p3))
