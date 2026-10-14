@@ -104,7 +104,8 @@ class Table:
     total: int
 
 
-def _cell(col: Column, value) -> str:
+def cell(col: Column, value) -> str:
+    """A value as the stats table shows it (".333", "3.45", "12.1")."""
     text = col.fmt.format(value)
     return text[1:] if col.bare and text.startswith("0.") else text
 
@@ -169,7 +170,7 @@ def build(
             start + i + 1,
             p.name,
             p.team,
-            [_cell(c, getattr(p, c.key)) for c in columns],
+            [cell(c, getattr(p, c.key)) for c in columns],
         )
         for i, p in enumerate(pool[start : start + page_size])
     ]

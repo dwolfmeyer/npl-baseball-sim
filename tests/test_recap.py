@@ -67,20 +67,36 @@ def test_week_page_carries_the_recaps():
         assert f"{team} went" in page
 
 
-def test_week_page_has_results_recaps_and_box_scores_in_three_columns():
+def test_week_page_has_standings_recaps_and_games_in_three_columns():
     teams, result = sim()
     page = render_week(result, "Test week", link=lambda i: f"game-{i + 1}.html")
     results, rest = page.split('id="c-recaps"')
-    recaps, boxes = rest.split('id="c-box"')
-    assert 'id="c-results"' in results and "Standings" in results
-    assert results.count('class="game" data-i=') == len(result.games)
-    assert recaps.count('class="recap" data-team=') == len(teams)
-    # Every game's box score is on the page, line score first, each linking its full page.
-    assert boxes.count('class="boxview"') == len(result.games)
-    assert boxes.count('<table class="line">') == len(result.games)
-    assert 'href="game-1.html">Full game page</a>' in boxes
+    recaps, games = rest.split('id="c-games"')
+    assert 'id="c-results"' in results and "Standings" in results and 'class="game' not in results
+    assert recaps.count('class="recap" data-team=') == len(teams) and 'class="game' not in recaps
+    # The games are in the third column, each with a link to its full box score page.
+    assert games.count('class="game go" data-i=') == len(result.games)
+    for i in range(len(result.games)):
+        assert f'<a class="box" href="game-{i + 1}.html">Box score</a>' in games
+    assert 'class="boxview"' not in page and '<table class="line">' not in page
     # The page's own tabs stand in for the columns on a narrow screen.
-    assert page.count('<button role="tab"') == 3
+    assert page.count('<button role="tab"') == 3 and 'data-c="games"' in page
+
+
+def test_recaps_show_team_hitting_and_pitching():
+    teams, result = sim()
+    recaps = week_recaps(result)
+    for team, recap in recaps.items():
+        hitting, pitching = dict(recap.hitting), dict(recap.pitching)
+        assert list(hitting) == ["AVG", "OBP", "SLG", "OPS", "R", "HR", "RBI", "SB", "BB", "SO"]
+        assert list(pitching) == ["ERA", "WHIP", "IP", "H", "ER", "HR", "BB", "SO"]
+        boxes = [box_score(g["events"]) for g in result.games if team in (g["away"], g["home"])]
+        assert hitting["R"] == str(sum(b.runs[team] for b in boxes))
+        assert pitching["ER"].isdigit() and "." in pitching["ERA"] and "." in pitching["IP"]
+        assert hitting["AVG"].startswith(".") or hitting["AVG"].startswith("1")
+    page = render_week(result, "Test week")
+    assert page.count(">Hitting</td>") == len(teams) and page.count(">Pitching</td>") == len(teams)
+    assert "<th>OPS</th>" in page and "<th>WHIP</th>" in page
 
 
 def test_coverage_names_players_who_sat_out_from_the_names_given():
