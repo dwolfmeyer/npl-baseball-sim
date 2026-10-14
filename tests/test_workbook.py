@@ -54,7 +54,7 @@ def _workbook(path):
 def test_tabs_match_config_teams():
     assert team_for_tab("Ducksnorts #12", TEAMS) == "Midwest Ducksnorts"
     assert team_for_tab("Guys #21", TEAMS) == "Bad Guys"
-    assert team_for_tab("Rats #8", TEAMS) == "Absolute Sickos"
+    assert team_for_tab("Rats #8", TEAMS) == "Rats"
     assert team_for_tab("Nobody #99", TEAMS) is None
 
 

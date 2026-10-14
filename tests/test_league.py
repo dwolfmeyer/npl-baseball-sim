@@ -32,7 +32,7 @@ def test_test_teams_are_where_dave_put_them_for_2026_and_2027():
             "AL",
             "Oil Can",
         )
-        assert (slots["Absolute Sickos"].league, slots["Absolute Sickos"].division) == (
+        assert (slots["Rats"].league, slots["Rats"].division) == (
             "NL",
             "Stan The Man",
         )
