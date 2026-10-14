@@ -93,7 +93,8 @@ the weekly talent blend is wired in.
 
 Along the way it keeps season to date (`npl_sim/season_stats.py`): each team's record and every
 player's batting and pitching totals, folded in from each game's box score and saved as
-plain JSON (`SeasonStats.to_json`). Standings and, next, leaders and recaps read from it.
+plain JSON (`SeasonStats.to_json`). Standings and league leaders (`npl_sim/leaders.py`: top players per category in each
+league, with MLB's qualifiers scaled to games played) read from it; `sim-season` prints both.
 
 ### Game engine
 

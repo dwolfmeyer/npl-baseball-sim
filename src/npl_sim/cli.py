@@ -413,6 +413,7 @@ def _sim_week(args: argparse.Namespace) -> int:
 
 
 def _sim_season(args: argparse.Namespace, league_file) -> int:
+    from npl_sim.leaders import league_leaders
     from npl_sim.rosters import eligibility as elig_data
     from npl_sim.season import default_cards, sim_season
     from npl_sim.season_stats import division_standings, format_gb
@@ -455,6 +456,12 @@ def _sim_season(args: argparse.Namespace, league_file) -> int:
                 f"{r.rs:>4} {r.ra:>4} {r.home_w:>3}-{r.home_l:<3} {r.away_w:>3}-{r.away_l:<3} "
                 f"{r.last10[0]}-{r.last10[1]:<3} {r.streak:>4}"
             )
+    for league_name, boards in league_leaders(result.stats, alignment, n=3).items():
+        print(f"\n{league_name} leaders")
+        for kind in ("batting", "pitching"):
+            for label, rows in boards[kind].items():
+                top = ", ".join(f"{r.name} {r.value} ({r.team})" for r in rows)
+                print(f"  {label:<4} {top}")
     t = result.totals
     pa = t["PA"]
     hits = sum(t[h] for h in ("1B", "2B", "3B", "HR"))
