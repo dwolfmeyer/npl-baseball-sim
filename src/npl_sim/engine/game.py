@@ -53,6 +53,10 @@ BUNT_ODDS = {
     "K": 0.08,
 }
 HIT_BASES = {"1B": 1, "2B": 2, "3B": 3}
+# A throwing error on a single or double lets the batter take one more base (the official
+# scorer's error, but the batter doesn't reach on it). With the reach-on-error rate, about
+# 0.50 errors per team-game, the 2025 MLB level. Flagged for Milestone 8.
+THROWING_ERROR = 0.02
 # Pitcher limits that no card setting can lift.
 MAX_PITCHES = 120
 NO_HITTER_PITCHES = 130  # a starter still working a no-hitter
@@ -261,6 +265,7 @@ class GameSim:
         self.alignment = "normal"  # the fielding team's alignment for the current PA
         self._homer = False  # every run counts on a walk-off home run
         self._ground_rule = False  # the last double bounced out of play
+        self._throwing = False  # a throwing error let the batter take an extra base
         self._outs_on_bases: list[dict] = []  # runners thrown out on the last PA
         self._pa_pitches = 0  # pitches of the coming PA thrown on steals and wild pitches
 
@@ -864,7 +869,7 @@ class GameSim:
         outs_before = self.outs
         before = list(self.bases)
         scored: list[dict] = []
-        self._homer = self._ground_rule = False
+        self._homer = self._ground_rule = self._throwing = False
         self._outs_on_bases = []
         outcome = self._resolve(result, hitter, pitcher, scored)
         if outcome in HIT_BASES and scored and self._walkoff():
@@ -883,6 +888,8 @@ class GameSim:
             extra["bunt"] = True
         if self._ground_rule and outcome == "2B":
             extra["ground_rule"] = True
+        if self._throwing:
+            extra["throwing_error"] = True
         if self._outs_on_bases:
             extra["thrown_out"] = self._outs_on_bases
         if outcome == "K":
@@ -927,6 +934,8 @@ class GameSim:
                 end = "score"
             elif r.id in after:
                 end = bases[after[r.id]]
+            elif self._walkoff():
+                continue  # the game ended before this runner got home; he isn't out
             else:
                 end = "out"
             move = {"runner": r.id, "start": start, "end": end}
@@ -1009,6 +1018,7 @@ class GameSim:
                 else:
                     second = b[0]
             self.bases = [batter, second, third]
+            self._throwing_error(batter, 0, "1B")
             return "1B"
         if res == "2B":
             # A ground-rule double gives every runner exactly two bases.
@@ -1029,6 +1039,7 @@ class GameSim:
                 else:
                     third = b[0]
             self.bases = [None, batter, third]
+            self._throwing_error(batter, 1, "2B")
             return "2B"
         if res == "3B":
             for r in b:
@@ -1069,6 +1080,16 @@ class GameSim:
                     self._thrown_out(b[1], "3B")
                     b[1] = None
         return {"FB": "FO", "LD": "LO", "PU": "PO"}[bip]
+
+    def _throwing_error(self, batter: Runner, at: int, result: str) -> None:
+        """A throw on the hit gets away and the batter takes one more base (not on a
+        walk-off). His run is unearned: without the error he stops where the hit put him."""
+        if self._walkoff() or self.bases[at + 1] is not None or self.outs >= 3:
+            return
+        if self.rng.random() < THROWING_ERROR:
+            self.bases[at], self.bases[at + 1] = None, batter
+            batter.earned = False
+            self._throwing = True
 
     def _send(self, runner: Runner, take: float, safe: float) -> bool | None:
         """Whether a runner goes for the extra base on a hit or a fly, and how
