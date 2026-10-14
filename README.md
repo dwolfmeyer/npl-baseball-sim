@@ -217,7 +217,10 @@ dates from `config/calendar.yaml` (week 1 is Mar 23 - Mar 29, week 27 Sep 21 - S
 2026); `?week=N` links to one, and the default is the latest. Without `--week` each player gets a typical week at his season pace
 from the eligibility data (full time when he has none). `--out` writes a week
 page with standings, a short recap per team (record, best bat and start, notable games,
-bullpen use and who covered; `reporting/recap.py`) and who sat or filled in, plus a Gameday page per game;
+bullpen use and who covered; `reporting/recap.py`) and who sat or filled in, plus a Gameday page per game.
+The week page is three columns that never scroll sideways: results (standings and the games), recaps,
+and the box score of the game you click (all the box scores are on the page, so it works offline);
+a team picker filters all three, and on a phone the columns become tabs;
 `--save` adds the games to the web app. Without `--week` everyone is league
 average; with it, each player plays at his talent blend for that week.
 With `--audit DIR` it also writes an audit log for checking the engine's realism: `game-NN.jsonl` per game with every

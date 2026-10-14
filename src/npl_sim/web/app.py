@@ -369,7 +369,11 @@ def create_app(
             link=lambda i: f"/games/{game_ids[i]}",
             names=names,
         )
-        page = page.replace("<main>", '<main><p class="sub"><a href="/">Back to teams</a></p>', 1)
+        page = page.replace(
+            '<main class="week">',
+            '<main class="week"><p class="sub"><a href="/">Back to teams</a></p>',
+            1,
+        )
         week_id = store.save_week(
             {
                 "seed": seed,

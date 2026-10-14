@@ -168,14 +168,15 @@ def _bullpen_use(boxes: list[BoxScore], team: str) -> str | None:
     return text + (f"; {_plural(saves, 'save')}." if saves else ".")
 
 
-def team_recap(team: str, games: list[dict]) -> Recap:
-    """`games` are the week's `WeekResult.games` that `team` played in."""
+def team_recap(team: str, games: list[dict], known: dict[str, str] | None = None) -> Recap:
+    """`games` are the week's `WeekResult.games` that `team` played in; `known` maps ids to
+    names for players who sat out and so aren't in any box score."""
     boxes = [box_score(g["events"]) for g in games]
     wins = sum(box.winner == team for box in boxes)
     losses = len(boxes) - wins
     runs = sum(box.runs[team] for box in boxes)
     allowed = sum(box.runs[next(t for t in box.runs if t != team)] for box in boxes)
-    names: dict[str, str] = {}
+    names: dict[str, str] = dict(known or {})
     for g in games:
         names.update(_names(g["events"]))
     headline = (
@@ -194,11 +195,11 @@ def team_recap(team: str, games: list[dict]) -> Recap:
     return Recap(team, (wins, losses), headline, lines)
 
 
-def week_recaps(result: WeekResult) -> dict[str, Recap]:
+def week_recaps(result: WeekResult, names: dict[str, str] | None = None) -> dict[str, Recap]:
     """A recap for every team that played, best record first."""
     by_team: dict[str, list[dict]] = defaultdict(list)
     for g in result.games:
         by_team[g["away"]].append(g)
         by_team[g["home"]].append(g)
-    recaps = {team: team_recap(team, games) for team, games in by_team.items()}
+    recaps = {team: team_recap(team, games, names) for team, games in by_team.items()}
     return dict(sorted(recaps.items(), key=lambda kv: (-kv[1].record[0], kv[0])))
