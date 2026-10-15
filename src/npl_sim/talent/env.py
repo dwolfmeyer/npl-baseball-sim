@@ -9,7 +9,7 @@ card is "this much better than the league" and the league itself is today's.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -36,10 +36,23 @@ class League:
     # (steal attempts per time on first, success rate) from this season's box
     # scores (talent/running.py); None = the engine's defaults.
     steal: tuple[float, float] | None = None
+    # (hit, power) per (bats, throws): how much more often a ball in play falls in, and how
+    # much more of those hits go for extra bases, than the all-matchups `hit` table says.
+    # Retrosheet 2023 to 2025: a right-handed batter facing a lefty has a BABIP 2% above the
+    # average, a lefty batter facing a righty slightly below. Empty means no difference.
+    index: dict[tuple[str, str], tuple[float, float]] = field(default_factory=dict)
 
     def env(self) -> LeagueEnv:
         rates = {
-            key: Rates(k=r["K"], bb=r["BB"], hbp=r["HBP"], hr=r["HR"], bip=dict(self.bip[key]))
+            key: Rates(
+                k=r["K"],
+                bb=r["BB"],
+                hbp=r["HBP"],
+                hr=r["HR"],
+                bip=dict(self.bip[key]),
+                hit=self.index.get(key, (1.0, 1.0))[0],
+                power=self.index.get(key, (1.0, 1.0))[1],
+            )
             for key, r in self.pa.items()
         }
         steal = (
@@ -90,10 +103,31 @@ def league(pa: pd.DataFrame, prior: pd.DataFrame | None = None) -> League:
             continue
         by = sub.groupby("outcome")["w"].sum()
         hit[t] = {h: float(by.get(h, 0.0)) / total for h in HITS}
-    return League(pa=rates, bip=mix, hit=hit)
+    return League(pa=rates, bip=mix, hit=hit, index=_split_index(balls, hit))
 
 
 def _shares(frame: pd.DataFrame, col: str, keys) -> dict[str, float]:
     by = frame.groupby(col)["w"].sum()
     total = by.sum()
     return {k: float(by.get(k, 0.0)) / total if total else 0.0 for k in keys}
+
+
+def _split_index(balls: pd.DataFrame, hit: dict) -> dict[tuple[str, str], tuple[float, float]]:
+    """(hit, power) for each batter-hand / pitcher-hand matchup: hits and extra-base hits per
+    ball in play against what the all-matchups `hit` table expects for the same balls."""
+    sums = {t: sum(h.values()) for t, h in hit.items()}
+    xbh = {t: h["2B"] + h["3B"] for t, h in hit.items()}
+    out = {}
+    for bats in HANDS:
+        for throws in HANDS:
+            sub = balls[(balls["stand"] == bats) & (balls["p_throws"] == throws)]
+            weight = sub["w"]
+            expected = (sub["bip"].map(sums) * weight).sum()
+            expected_xbh = (sub["bip"].map(xbh) * weight).sum()
+            if weight.sum() < 500 or expected <= 0 or expected_xbh <= 0:
+                continue
+            seen = (sub["outcome"].isin(HITS) * weight).sum()
+            seen_xbh = (sub["outcome"].isin(("2B", "3B")) * weight).sum()
+            hit_index = seen / expected
+            out[(bats, throws)] = (float(hit_index), float(seen_xbh / expected_xbh / hit_index))
+    return out

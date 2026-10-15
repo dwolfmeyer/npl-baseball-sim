@@ -138,6 +138,12 @@ def annotate(pa: pd.DataFrame, league: League, parks: dict | None = None) -> pd.
     out["e_XBH"] = out["bip"].map(xbh).fillna(0.0)
     if parks:
         _park_adjust(out, league, parks)
+    # Hits and extra-base hits are measured against this matchup's league, not the average of
+    # all matchups: the engine puts the matchup's own level back (Rates.hit and power).
+    split = [league.index.get(k, (1.0, 1.0)) for k in key]
+    hit_level = pd.Series([h for h, _ in split], index=out.index)
+    out["e_HIT"] *= hit_level
+    out["e_XBH"] *= hit_level * pd.Series([p for _, p in split], index=out.index)
     return out
 
 
@@ -444,7 +450,8 @@ def rates(index: dict[str, float], league: League, key: tuple[str, str]) -> Rate
         true = {s: v * 0.9 / total for s, v in true.items()}
     mix = {t: index[t] * league.bip[key][t] for t in BIP_TYPES}
     m = sum(mix.values()) or 1.0
-    hit = index["HIT"]
+    league_hit, league_power = league.index.get(key, (1.0, 1.0))
+    hit = index["HIT"] * league_hit
     return Rates(
         k=true["K"],
         bb=true["BB"],
@@ -452,7 +459,7 @@ def rates(index: dict[str, float], league: League, key: tuple[str, str]) -> Rate
         hr=true["HR"],
         bip={t: v / m for t, v in mix.items()},
         hit=hit,
-        power=index["XBH"] / hit if hit else 1.0,
+        power=index["XBH"] / index["HIT"] * league_power if index["HIT"] else 1.0,
     )
 
 
