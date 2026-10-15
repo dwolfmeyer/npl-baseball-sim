@@ -19,12 +19,17 @@ BIP_TYPES = ("GB", "LD", "FB", "PU")
 HIT_TYPES = ("1B", "2B", "3B")
 
 
-# The average fatigue (0 to 1, game.GameSim._fatigue) of the pitcher in a PA. Batter,
-# pitcher and league rates are season stats, which already include tired arms at this
-# average rate, so fatigue moves a PA only by how far the pitcher is from it. Measured
-# over 1,000 average-team games; Milestone 8 should replace it with the real share of PAs
-# by pitch count and times through the order.
-LEAGUE_FATIGUE = 0.111
+# Pitcher workload f (game.GameSim._fatigue): batters faced / 18 plus half the share of the
+# late-pitch tail past 80% of the pitch limit. It rises from the first batter, as the
+# times-through-the-order studies find (Brill 2023: a steady decline per batter, not a cliff
+# at the third look). Season rates already include tired arms at the role's usual workload,
+# so a PA moves only by how far f is from `typical` (starters ~0.71, relievers ~0.25, see
+# game.STARTER_WORKLOAD). LEAGUE_FATIGUE is the all-PA mean, the default when no role is given.
+# Effect per unit of f on each outcome. The slopes are fits to 2023-25 starter splits
+# (K -1.1%, HR +0.7% per batter faced) and are flagged for Milestone 8.
+WORKLOAD_EFFECTS = {"K": -0.20, "HR": 0.15, "BB": 0.05}
+WORKLOAD_HIT_EFFECT = 0.02  # on the share of balls in play that fall in
+LEAGUE_FATIGUE = 0.56
 
 
 @dataclass(frozen=True)
@@ -173,6 +178,7 @@ def pa_probabilities(
     defense: Defense,
     fatigue: float = LEAGUE_FATIGUE,
     alignment: str = "normal",
+    typical: float = LEAGUE_FATIGUE,
 ) -> dict[str, float]:
     """Final outcome probabilities for one PA, every adjustment applied once.
 
@@ -183,10 +189,10 @@ def pa_probabilities(
     league = env.split(bats, throws)
     # Platoon-aware combine against the league rate for this hand matchup.
     true = log5(batter.true_outcomes(), pitcher.true_outcomes(), league.true_outcomes())
-    # Fatigue: a tired pitcher walks more, misses fewer bats, gives up more HR, and a fresh
-    # one does the opposite, relative to the league-average pitcher (see LEAGUE_FATIGUE).
-    for outcome, effect in (("BB", 0.5), ("HR", 0.6), ("K", -0.3)):
-        true[outcome] *= (1 + effect * fatigue) / (1 + effect * LEAGUE_FATIGUE)
+    # Workload: a pitcher deep into his outing misses fewer bats and gives up more HR and
+    # hits, a fresh one the opposite, relative to his role's typical workload (see above).
+    for outcome, effect in WORKLOAD_EFFECTS.items():
+        true[outcome] *= (1 + effect * fatigue) / (1 + effect * typical)
     # Catcher framing.
     true["K"] *= 1 + defense.framing
     true["BB"] *= 1 - defense.framing
@@ -197,6 +203,7 @@ def pa_probabilities(
 
     bip_mix = log5(batter.bip, pitcher.bip, league.bip)
     hit_skill = batter.hit * pitcher.hit / league.hit
+    hit_skill *= (1 + WORKLOAD_HIT_EFFECT * fatigue) / (1 + WORKLOAD_HIT_EFFECT * typical)
     power = batter.power * pitcher.power / league.power
     align = ALIGNMENTS[alignment]
 
