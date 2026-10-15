@@ -73,7 +73,9 @@ def test_a_starter_and_a_reliever_at_their_role_typical_workload_get_the_league_
     me = SimpleNamespace(env=DEFAULT_ENV)
     for starter in (True, False):
         typical = GameSim._typical(me, _side(0, 0, starter))
-        a = pa_probabilities(b, b, DEFAULT_ENV, "R", "R", NEUTRAL_PARK, Defense(), typical, typical=typical)
+        a = pa_probabilities(
+            b, b, DEFAULT_ENV, "R", "R", NEUTRAL_PARK, Defense(), typical, typical=typical
+        )
         c = pa_probabilities(b, b, DEFAULT_ENV, "R", "R", NEUTRAL_PARK, Defense())
         for k in c:
             assert a[k] == pytest.approx(c[k], rel=1e-9)

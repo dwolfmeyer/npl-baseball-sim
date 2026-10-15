@@ -684,7 +684,11 @@ class GameSim:
     def _typical(self, defense: _Side) -> float:
         """The workload season rates already include for this pitcher's role."""
         card, p = defense.card, defense.pitcher
-        return STARTER_WORKLOAD if p.id == card.starter.id or p.id in card.follow else RELIEVER_WORKLOAD
+        return (
+            STARTER_WORKLOAD
+            if p.id == card.starter.id or p.id in card.follow
+            else RELIEVER_WORKLOAD
+        )
 
     def _fatigue(self, defense: _Side) -> float:
         """Workload: batters faced / 18, plus half the late-pitch tail past 80% of the limit."""
