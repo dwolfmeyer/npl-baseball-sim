@@ -220,19 +220,21 @@ def test_phantom_outs_reset_each_half_inning_and_runs_stay_unearned_once_flagged
                     assert not s["earned"], (seed, e)
 
 
-# Errors (item 10): MLB had 0.50 errors per team-game in 2025 (Now Taking the Field); the
-# reach-on-error alone gave 0.36. Throwing errors on hits supply the rest.
+# Errors (item 10). Retrosheet 2023 to 2025, per team-game: 0.221 reach-on-error, 0.114 errors on
+# hits (a throw lets the batter or a runner take a base), 0.079 on ground-ball outs with a
+# runner on; 0.52 in all, of which steal and pickoff errors (0.065) and fly-ball errors are
+# not modeled.
 def _error_games():
     from npl_sim.engine.game import simulate_game
 
     from .test_engine import AWAY, HOME
 
-    return [simulate_game(AWAY, HOME, DEFAULT_ENV, s) for s in range(600)]
+    return [simulate_game(AWAY, HOME, DEFAULT_ENV, s) for s in range(1000)]
 
 
-def test_errors_per_team_game_match_mlb_and_throwing_errors_advance_the_batter():
+def test_errors_per_team_game_match_retrosheet_by_kind():
     games = _error_games()
-    errors = throwing = 0
+    reach = on_hit = on_out = 0
     for events in games:
         thrown: set = set()
         for e in events:
@@ -240,16 +242,20 @@ def test_errors_per_team_game_match_mlb_and_throwing_errors_advance_the_batter()
                 thrown = set()
             if e["type"] != "pa":
                 continue
-            errors += e["result"] == "E"
+            reach += e["result"] == "E"
             if e.get("throwing_error"):
-                throwing += 1
-                assert e["result"] in ("1B", "2B")
-                thrown.add(e["batter"])
-                # the batter ends a base past the hit
-                mv = next(m for m in e["runners"] if m["runner"] == e["batter"])
-                assert mv["end"] in ("2B", "3B", "score")
+                if e["result"] in ("1B", "2B"):
+                    on_hit += 1
+                    thrown.add(e["batter"])
+                    mv = next(m for m in e["runners"] if m["runner"] == e["batter"])
+                    assert mv["end"] in ("2B", "3B", "score")
+                else:
+                    assert e["result"] in ("GO", "FC")
+                    on_out += 1
             for s in e["scored"]:
                 if s["runner"] in thrown:
                     assert not s["earned"]
-    assert throwing > 0
-    assert (errors + throwing) / len(games) / 2 == pytest.approx(0.50, rel=0.10)
+    tg = len(games) * 2
+    assert reach / tg == pytest.approx(0.221, rel=0.12)
+    assert on_hit / tg == pytest.approx(0.114, rel=0.15)
+    assert on_out / tg == pytest.approx(0.079, rel=0.20)

@@ -41,7 +41,7 @@ GROUND_RULE_DOUBLE = 0.07
 # Chance of each before a PA with runners on, tuned to recent MLB (per team
 # game about 0.33 wild pitches, 0.05 passed balls, 0.03 balks); a wild
 # pitcher's chance scales with his walk rate.
-WILD_PITCH, PASSED_BALL, BALK = 0.019, 0.003, 0.0016
+WILD_PITCH, PASSED_BALL, BALK = 0.019, 0.003, 0.0025
 # How a sacrifice-bunt attempt turns out: sacrifice, bunt single, lead runner
 # forced, popped up, double play, struck out on a foul bunt.
 BUNT_ODDS = {
@@ -57,6 +57,14 @@ HIT_BASES = {"1B": 1, "2B": 2, "3B": 3}
 # scorer's error, but the batter doesn't reach on it). With the reach-on-error rate, about
 # 0.50 errors per team-game, the 2025 MLB level. Flagged for Milestone 8.
 THROWING_ERROR = 0.02
+# Retrosheet 2023 to 2025: the batter reaches on an error on this share of balls in play that
+# aren't hits, by type (grounders are most of them). On 2.1% of ground-ball outs with a runner
+# on (5.5% of those that aren't double plays) a throw gets away and the lead runner takes a
+# base. Defense.error_rate scales the first relative to the league's DEFAULT_ERROR_RATE.
+# Not modeled: errors on steals and pickoffs (0.065 per team-game) and on fly balls (0.03).
+ERROR_ON_BIP = {"GB": 0.0238, "LD": 0.0037, "FB": 0.0023, "PU": 0.0026}
+ERROR_ON_GB_OUT = 0.055
+DEFAULT_ERROR_RATE = Defense().error_rate
 # Pitcher limits that no card setting can lift.
 MAX_PITCHES = 120
 NO_HITTER_PITCHES = 130  # a starter still working a no-hitter
@@ -1049,13 +1057,23 @@ class GameSim:
             return "3B"
 
         # A ball in play turned into an out, unless the fielder errs.
-        if rng.random() < self._fielding().defense.error_rate:
+        error = ERROR_ON_BIP[bip] * self._fielding().defense.error_rate / DEFAULT_ERROR_RATE
+        if rng.random() < error:
             batter.earned = False
             self._phantom_outs += 1
             self._force(batter, scored)
             return "E"
         if bip == "GB":
-            return self._ground_out(batter, scored)
+            runners = any(b)
+            result = self._ground_out(batter, scored)
+            if (
+                result in ("GO", "FC")
+                and runners
+                and self.outs < 3
+                and rng.random() < ERROR_ON_GB_OUT
+            ):
+                self._runner_error(scored)
+            return result
         self.outs += 1
         if bip == "FB" and self.outs < 3:
             go = (
@@ -1090,6 +1108,26 @@ class GameSim:
             self.bases[at], self.bases[at + 1] = None, batter
             batter.earned = False
             self._throwing = True
+
+    def _runner_error(self, scored: list) -> None:
+        """A throw on a ground-ball out gets away: the lead runner takes one more base. His
+        run, if it scores, is unearned."""
+        b = self.bases
+        for at in (2, 1, 0):
+            runner = b[at]
+            if runner is None:
+                continue
+            if at == 2:
+                runner.earned = False
+                self._score(runner, scored)
+                b[2] = None
+            elif b[at + 1] is None:
+                b[at], b[at + 1] = None, runner
+                runner.earned = False
+            else:
+                continue
+            self._throwing = True
+            return
 
     def _send(self, runner: Runner, take: float, safe: float) -> bool | None:
         """Whether a runner goes for the extra base on a hit or a fly, and how
