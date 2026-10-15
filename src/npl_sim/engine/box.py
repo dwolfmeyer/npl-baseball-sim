@@ -263,6 +263,11 @@ def box_score(events: list[dict], away: str | None = None, home: str | None = No
                 fid = roster.fielder_id(defense, e["fielder"], e["pitcher"])
                 if fid:
                     notes[defense]["E"].append((roster.short[fid], "fielding"))
+            if e.get("throwing_error"):
+                errors[defense] += 1
+                fid = roster.fielder_id(defense, e["fielder"], e["pitcher"])
+                if fid:
+                    notes[defense]["E"].append((roster.short[fid], "throwing"))
             if res in GROUND_OUTS and e["bip"] == "GB":
                 p.ground_outs += 1
             elif res in GROUND_OUTS or res in AIR_OUTS:
