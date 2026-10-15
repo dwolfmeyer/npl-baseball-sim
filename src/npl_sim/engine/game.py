@@ -20,8 +20,8 @@ import math
 import random
 from dataclasses import asdict, dataclass, field
 
+from npl_sim.engine import advancement, detail, fielding
 from npl_sim.engine import bullpen as pen
-from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
 from npl_sim.engine.manager import Baserunning, Bunting, PinchHitting, run_value
@@ -64,7 +64,7 @@ FORCE_OUT = 0.61
 # A throwing error on a single or double lets the batter take one more base (the official
 # scorer's error, but the batter doesn't reach on it). With the reach-on-error rate, about
 # 0.50 errors per team-game, the 2025 MLB level. Flagged for Milestone 8.
-THROWING_ERROR = 0.02
+THROWING_ERROR = 0.024
 # Retrosheet 2023 to 2025: the batter reaches on an error on this share of balls in play that
 # aren't hits, by type (grounders are most of them). On 2.1% of ground-ball outs with a runner
 # on (5.5% of those that aren't double plays) a throw gets away and the lead runner takes a
@@ -282,6 +282,7 @@ class GameSim:
         self._homer = False  # every run counts on a walk-off home run
         self._ground_rule = False  # the last double bounced out of play
         self._throwing = False  # a throwing error let the batter take an extra base
+        self._field: str | None = None
         self._outs_on_bases: list[dict] = []  # runners thrown out on the last PA
         self._pa_pitches = 0  # pitches of the coming PA thrown on steals and wild pitches
 
@@ -886,6 +887,7 @@ class GameSim:
         before = list(self.bases)
         scored: list[dict] = []
         self._homer = self._ground_rule = self._throwing = False
+        self._field = None  # where a single or double was hit (advancement.py)
         self._outs_on_bases = []
         outcome = self._resolve(result, hitter, pitcher, scored)
         if outcome in HIT_BASES and scored and self._walkoff():
@@ -924,7 +926,7 @@ class GameSim:
             fielder=(
                 detail.bunt_fielder(drng, outcome)
                 if bunt is not None
-                else detail.fielder(drng, outcome, bip, side)
+                else detail.fielder(drng, outcome, bip, side, self._field)
             ),
             pitches=pitches,
             count=[balls, strikes],
@@ -1009,13 +1011,16 @@ class GameSim:
         bip, res = result.split(":")
         if bip == "BUNT":
             return self._bunt(res, batter)
+        if res in ("1B", "2B"):
+            side = hitter.side_vs(pitcher.throws)
+            self._field = advancement.pick_field(rng, res, bip, side)
         if res == "1B":
             if b[2]:
                 self._score(b[2], scored)
             third = None
             if b[1]:
-                two_out = 0.25 if self.outs == 2 else 0  # running on contact
-                go = self._send(b[1], 0.62 + 0.08 * b[1].hitter.speed - 0.06 * arm + two_out, 0.95)
+                take, safe = advancement.odds("single_2nd", self.outs, self._field)
+                go = self._send(b[1], take + 0.08 * b[1].hitter.speed - 0.06 * arm, safe)
                 if go:
                     self._score(b[1], scored)
                 elif go is False:
@@ -1026,7 +1031,8 @@ class GameSim:
             if b[0]:
                 go = None
                 if third is None and self.outs < 3:
-                    go = self._send(b[0], 0.27 + 0.07 * b[0].hitter.speed - 0.05 * arm, 0.96)
+                    take, safe = advancement.odds("single_1st", self.outs, self._field)
+                    go = self._send(b[0], take + 0.07 * b[0].hitter.speed - 0.05 * arm, safe)
                 if go:
                     third = b[0]
                 elif go is False:
@@ -1046,8 +1052,8 @@ class GameSim:
             if b[0] and self._ground_rule:
                 third = b[0]
             elif b[0]:
-                two_out = 0.2 if self.outs == 2 else 0
-                go = self._send(b[0], 0.42 + 0.10 * b[0].hitter.speed - 0.06 * arm + two_out, 0.92)
+                take, safe = advancement.odds("double_1st", self.outs, self._field)
+                go = self._send(b[0], take + 0.10 * b[0].hitter.speed - 0.06 * arm, safe)
                 if go:
                     self._score(b[0], scored)
                 elif go is False:

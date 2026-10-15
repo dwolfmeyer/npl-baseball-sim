@@ -65,11 +65,19 @@ def _pick(rng: random.Random, weights: dict[str, float], side: str) -> str:
     return rng.choices(list(w), weights=list(w.values()))[0]
 
 
-def fielder(rng: random.Random, result: str, bip: str | None, side: str) -> str | None:
-    """Position that fielded the ball, or None when nobody did (K, BB, HBP, HR)."""
+def fielder(
+    rng: random.Random, result: str, bip: str | None, side: str, field: str | None = None
+) -> str | None:
+    """Position that fielded the ball, or None when nobody did (K, BB, HBP, HR). `field` is
+    where the engine put a single or double (IF, LF, CF, RF), so the play log agrees with the
+    baserunning that followed."""
     if result in ("K", "BB", "HBP", "HR") or bip is None:
         return None
     if result in ("1B", "2B", "3B"):
+        if field in ("LF", "CF", "RF"):
+            return field
+        if field == "IF":
+            return _pick(rng, _INFIELD_GB if bip == "GB" else _INFIELD_LD, side)
         return _pick(rng, _OUTFIELD_GB if bip == "GB" else _OUTFIELD_AIR, side)
     if result in ("SF", "FO"):
         return _pick(rng, _OUTFIELD_AIR, side)

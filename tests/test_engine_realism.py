@@ -292,3 +292,48 @@ def test_ground_balls_with_a_runner_on_first_turn_into_double_plays_like_mlb():
     right = shares["R"]["DP"] / sum(shares["R"].values())
     left = shares["L"]["DP"] / sum(shares["L"].values())
     assert right - left == pytest.approx(0.13, abs=0.05)
+
+
+# Advancement (item 8): Retrosheet 2023 to 2025. A runner on second scores on 60.9% of singles
+# (40% with none out, 53% with one, 79% with two); a runner on first, second open, takes third
+# or home on 31.7%; a runner on first scores on 39.3% of doubles. Where the ball went matters
+# (to right a runner on first reaches third far more often than to left).
+def test_runners_advance_on_hits_like_mlb():
+    from collections import Counter
+
+    from npl_sim.engine.game import simulate_game
+
+    from .test_engine import AWAY, HOME
+
+    seen: Counter = Counter()
+    for seed in range(1500):
+        for e in simulate_game(AWAY, HOME, DEFAULT_ENV, seed):
+            if e["type"] != "pa" or e["result"] not in ("1B", "2B"):
+                continue
+            for m in e["runners"]:
+                if e["result"] == "1B" and m["start"] == "2B":
+                    seen["s2", e["outs_before"]] += 1
+                    seen["s2+", e["outs_before"]] += m["end"] == "score"
+                if e["result"] == "1B" and m["start"] == "1B" and e["bases_before"][1] is None:
+                    seen["s1"] += 1
+                    seen["s1+"] += m["end"] in ("3B", "score")
+                if e["result"] == "2B" and m["start"] == "1B":
+                    seen["d1"] += 1
+                    seen["d1+"] += m["end"] == "score"
+    for outs, real in ((0, 0.40), (1, 0.53), (2, 0.79)):
+        assert seen["s2+", outs] / seen["s2", outs] == pytest.approx(real, abs=0.04)
+    assert seen["s1+"] / seen["s1"] == pytest.approx(0.317, abs=0.03)
+    assert seen["d1+"] / seen["d1"] == pytest.approx(0.393, abs=0.05)
+
+
+def test_hits_to_the_outfield_name_the_fielder_the_baserunning_used():
+    from npl_sim.engine.game import simulate_game
+
+    from .test_engine import AWAY, HOME
+
+    fields = set()
+    for seed in range(60):
+        for e in simulate_game(AWAY, HOME, DEFAULT_ENV, seed):
+            if e["type"] == "pa" and e["result"] in ("1B", "2B") and e["bip"] in ("LD", "FB"):
+                fields.add(e["fielder"])
+    assert {"LF", "CF", "RF"} <= fields
