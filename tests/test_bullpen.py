@@ -94,6 +94,8 @@ def test_engine_uses_designations_without_a_closer():
     for seed in range(300):
         events = simulate_game(away, home, DEFAULT_ENV, seed)
         for e in entries(events):
+            if e["into"] not in roles:
+                continue  # a stand-in arm after the whole pen was used has no designation
             assert e["situation"] in ("high", "medium", "low", "mopup", "early")
             if e["into"] == names[1]:
                 assert e["outs"] == 0 and e["on_base"] == 0  # start of an inning only

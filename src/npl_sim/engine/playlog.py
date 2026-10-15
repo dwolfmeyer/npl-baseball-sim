@@ -164,7 +164,7 @@ def game_log(events: list[dict]) -> GameLog:
             score[offense] += runs
             half.runs += runs
             half.hits += e["result"] in ("1B", "2B", "3B", "HR")
-            half.errors += e["result"] == "E"
+            half.errors += e["result"] == "E" or bool(e.get("throwing_error"))
             play = Play(
                 description=_describe_pa(e, full, fielder),
                 kind="pa",
@@ -379,6 +379,8 @@ def _describe_pa(e: dict, full: dict[str, str], fielder) -> str:
         lead = f"{batter} reaches on a fielding error by {fielder(pos)}."
     else:  # pragma: no cover - every engine result is handled above
         lead = f"{batter} {res}."
+    if e.get("throwing_error"):
+        lead += f" Throwing error by {fielder(pos)}, {batter} takes an extra base."
     return " ".join([lead, *_runner_notes(e, full)])
 
 

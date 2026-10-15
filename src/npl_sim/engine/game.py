@@ -20,8 +20,8 @@ import math
 import random
 from dataclasses import asdict, dataclass, field
 
+from npl_sim.engine import advancement, detail, fielding
 from npl_sim.engine import bullpen as pen
-from npl_sim.engine import detail, fielding
 from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
 from npl_sim.engine.manager import Baserunning, Bunting, PinchHitting, run_value
@@ -41,7 +41,7 @@ GROUND_RULE_DOUBLE = 0.07
 # Chance of each before a PA with runners on, tuned to recent MLB (per team
 # game about 0.33 wild pitches, 0.05 passed balls, 0.03 balks); a wild
 # pitcher's chance scales with his walk rate.
-WILD_PITCH, PASSED_BALL, BALK = 0.019, 0.003, 0.0016
+WILD_PITCH, PASSED_BALL, BALK = 0.019, 0.003, 0.002
 # How a sacrifice-bunt attempt turns out: sacrifice, bunt single, lead runner
 # forced, popped up, double play, struck out on a foul bunt.
 BUNT_ODDS = {
@@ -53,6 +53,26 @@ BUNT_ODDS = {
     "K": 0.08,
 }
 HIT_BASES = {"1B": 1, "2B": 2, "3B": 3}
+# A ground ball that isn't a hit or an error, runner on first and fewer than two outs
+# (Retrosheet 2023 to 2025, 20,739 of them): 47.5% double plays (right-handed batters 52.8%,
+# left-handed 39.7%, 13% fewer with a runner on third), then 61% of the rest a force out at
+# second with the batter safe, and the rest a plain ground out. The 0.06 per unit of batter
+# speed is an estimate: Retrosheet has no sprint speed.
+DOUBLE_PLAY = {"R": 0.528, "L": 0.397}
+DOUBLE_PLAY_RUNNER_ON_THIRD = 0.87
+FORCE_OUT = 0.61
+# A throwing error on a single or double lets the batter take one more base (the official
+# scorer's error, but the batter doesn't reach on it). With the reach-on-error rate, about
+# 0.50 errors per team-game, the 2025 MLB level. Flagged for Milestone 8.
+THROWING_ERROR = 0.024
+# Retrosheet 2023 to 2025: the batter reaches on an error on this share of balls in play that
+# aren't hits, by type (grounders are most of them). On 2.1% of ground-ball outs with a runner
+# on (5.5% of those that aren't double plays) a throw gets away and the lead runner takes a
+# base. Defense.error_rate scales the first relative to the league's DEFAULT_ERROR_RATE.
+# Not modeled: errors on steals and pickoffs (0.065 per team-game) and on fly balls (0.03).
+ERROR_ON_BIP = {"GB": 0.0238, "LD": 0.0037, "FB": 0.0023, "PU": 0.0026}
+ERROR_ON_GB_OUT = 0.055
+DEFAULT_ERROR_RATE = Defense().error_rate
 # Pitcher limits that no card setting can lift.
 MAX_PITCHES = 120
 NO_HITTER_PITCHES = 130  # a starter still working a no-hitter
@@ -61,8 +81,16 @@ MOP_UP_RUNS = 7  # a reliever is pulled after allowing this many
 # becomes a chance before each PA he's on first with second open; tuned so a
 # league of average runners tries about as often as MLB in 2024-25 (0.96 a
 # team game, about one in ten of them for third).
-STEAL_PER_PA = 1.12
+STEAL_PER_PA = 0.95
 STEAL_THIRD = 0.6  # relative chance of trying for third from second
+# When they run (Retrosheet 2023 to 2025, runner on first with second open, relative to the
+# average): by the running team's lead from -6 to +6 or more, through the 6th inning and from
+# the 7th, then by outs. Nobody runs when well behind late, or far ahead.
+STEAL_BY_LEAD = {
+    False: (0.13, 0.32, 0.44, 0.64, 0.75, 1.02, 1.11, 1.23, 1.22, 1.27, 1.30, 1.30, 0.66),
+    True: (0.02, 0.10, 0.24, 0.28, 0.53, 1.28, 1.57, 1.62, 1.76, 1.78, 1.38, 1.06, 0.12),
+}
+STEAL_BY_OUTS = (0.83, 1.0, 1.12)
 # Success, on the log-odds scale: per unit of catcher arm (about 5 points of
 # success rate), the pitcher's hand holding the runner at first, the
 # easier steal of third, and per step of owner aggressiveness above normal.
@@ -254,11 +282,15 @@ class GameSim:
         self.inning = 1
         self.half = "top"
         self.outs = 0
+        # Outs the defense would have made but for errors this half-inning (rule 9.16).
+        self._phantom_outs = 0
         self.bases: list[Runner | None] = [None, None, None]
         self.line: dict[str, list[int]] = {"away": [], "home": []}
         self.alignment = "normal"  # the fielding team's alignment for the current PA
         self._homer = False  # every run counts on a walk-off home run
         self._ground_rule = False  # the last double bounced out of play
+        self._throwing = False  # a throwing error let the batter take an extra base
+        self._field: str | None = None
         self._outs_on_bases: list[dict] = []  # runners thrown out on the last PA
         self._pa_pitches = 0  # pitches of the coming PA thrown on steals and wild pitches
 
@@ -298,6 +330,11 @@ class GameSim:
         self._batting().runs += 1
         charged = self._fielding().charged
         charged[runner.pitcher_id] = charged.get(runner.pitcher_id, 0) + 1
+        # Rule 9.16: rebuild the inning with each error an out. A run scoring once that
+        # inning would have had three outs is unearned, whoever scored it. (Simplified: an
+        # error runner later retired on a force still counts as the one phantom out.)
+        if self.outs + self._phantom_outs >= 3:
+            runner.earned = False
         scored.append(
             {"runner": runner.hitter.id, "pitcher": runner.pitcher_id, "earned": runner.earned}
         )
@@ -507,6 +544,7 @@ class GameSim:
 
     def _half_inning(self) -> None:
         self.outs = 0
+        self._phantom_outs = 0
         self.bases = [None, None, None]
         side = self._batting()
         start_runs = side.runs
@@ -684,10 +722,11 @@ class GameSim:
             runner, base = b[1], "3B"
         else:
             return
-        if run.steal <= 0 or runner.hitter.id in run.no_steal or not self._steal_spot(offense):
+        if run.steal <= 0 or runner.hitter.id in run.no_steal:
             return
         attempt, success = steal_odds(runner.hitter, self.env)
         chance = STEAL_PER_PA * attempt * run.steal * (STEAL_THIRD if base == "3B" else 1.0)
+        chance *= self._steal_timing(offense)
         if self.rng.random() >= chance:
             return
         logit = _logit(success) - STEAL_CATCHER * defense.defense.catcher_arm
@@ -719,11 +758,11 @@ class GameSim:
             odds={"attempt": round(chance, 4), "success": round(made, 4)},
         )
 
-    def _steal_spot(self, offense: _Side) -> bool:
-        """Baseball's custom: nobody runs with a big lead, or trailing by three
-        or more late, when an out costs more than the base gains."""
-        lead = offense.runs - self._fielding().runs
-        return lead < 5 and not (self.inning >= 7 and lead <= -3)
+    def _steal_timing(self, offense: _Side) -> float:
+        """How much more or less often runners go in this game state than on average."""
+        lead = min(max(offense.runs - self._fielding().runs, -6), 6)
+        late = STEAL_BY_LEAD[self.inning >= 7][lead + 6]
+        return late * STEAL_BY_OUTS[min(self.outs, 2)]
 
     def _maybe_wild_pitch(self) -> None:
         """A wild pitch, passed ball or balk: every runner moves up a base."""
@@ -856,7 +895,8 @@ class GameSim:
         outs_before = self.outs
         before = list(self.bases)
         scored: list[dict] = []
-        self._homer = self._ground_rule = False
+        self._homer = self._ground_rule = self._throwing = False
+        self._field = None  # where a single or double was hit (advancement.py)
         self._outs_on_bases = []
         outcome = self._resolve(result, hitter, pitcher, scored)
         if outcome in HIT_BASES and scored and self._walkoff():
@@ -875,6 +915,8 @@ class GameSim:
             extra["bunt"] = True
         if self._ground_rule and outcome == "2B":
             extra["ground_rule"] = True
+        if self._throwing:
+            extra["throwing_error"] = True
         if self._outs_on_bases:
             extra["thrown_out"] = self._outs_on_bases
         if outcome == "K":
@@ -893,7 +935,7 @@ class GameSim:
             fielder=(
                 detail.bunt_fielder(drng, outcome)
                 if bunt is not None
-                else detail.fielder(drng, outcome, bip, side)
+                else detail.fielder(drng, outcome, bip, side, self._field)
             ),
             pitches=pitches,
             count=[balls, strikes],
@@ -919,6 +961,8 @@ class GameSim:
                 end = "score"
             elif r.id in after:
                 end = bases[after[r.id]]
+            elif self._walkoff():
+                continue  # the game ended before this runner got home; he isn't out
             else:
                 end = "out"
             move = {"runner": r.id, "start": start, "end": end}
@@ -976,13 +1020,16 @@ class GameSim:
         bip, res = result.split(":")
         if bip == "BUNT":
             return self._bunt(res, batter)
+        if res in ("1B", "2B"):
+            side = hitter.side_vs(pitcher.throws)
+            self._field = advancement.pick_field(rng, res, bip, side)
         if res == "1B":
             if b[2]:
                 self._score(b[2], scored)
             third = None
             if b[1]:
-                two_out = 0.25 if self.outs == 2 else 0  # running on contact
-                go = self._send(b[1], 0.62 + 0.08 * b[1].hitter.speed - 0.06 * arm + two_out, 0.95)
+                take, safe = advancement.odds("single_2nd", self.outs, self._field)
+                go = self._send(b[1], take + 0.08 * b[1].hitter.speed - 0.06 * arm, safe)
                 if go:
                     self._score(b[1], scored)
                 elif go is False:
@@ -993,7 +1040,8 @@ class GameSim:
             if b[0]:
                 go = None
                 if third is None and self.outs < 3:
-                    go = self._send(b[0], 0.27 + 0.07 * b[0].hitter.speed - 0.05 * arm, 0.96)
+                    take, safe = advancement.odds("single_1st", self.outs, self._field)
+                    go = self._send(b[0], take + 0.07 * b[0].hitter.speed - 0.05 * arm, safe)
                 if go:
                     third = b[0]
                 elif go is False:
@@ -1001,6 +1049,7 @@ class GameSim:
                 else:
                     second = b[0]
             self.bases = [batter, second, third]
+            self._throwing_error(batter, 0, "1B")
             return "1B"
         if res == "2B":
             # A ground-rule double gives every runner exactly two bases.
@@ -1012,8 +1061,8 @@ class GameSim:
             if b[0] and self._ground_rule:
                 third = b[0]
             elif b[0]:
-                two_out = 0.2 if self.outs == 2 else 0
-                go = self._send(b[0], 0.42 + 0.10 * b[0].hitter.speed - 0.06 * arm + two_out, 0.92)
+                take, safe = advancement.odds("double_1st", self.outs, self._field)
+                go = self._send(b[0], take + 0.10 * b[0].hitter.speed - 0.06 * arm, safe)
                 if go:
                     self._score(b[0], scored)
                 elif go is False:
@@ -1021,6 +1070,7 @@ class GameSim:
                 else:
                     third = b[0]
             self.bases = [None, batter, third]
+            self._throwing_error(batter, 1, "2B")
             return "2B"
         if res == "3B":
             for r in b:
@@ -1030,12 +1080,23 @@ class GameSim:
             return "3B"
 
         # A ball in play turned into an out, unless the fielder errs.
-        if rng.random() < self._fielding().defense.error_rate:
+        error = ERROR_ON_BIP[bip] * self._fielding().defense.error_rate / DEFAULT_ERROR_RATE
+        if rng.random() < error:
             batter.earned = False
+            self._phantom_outs += 1
             self._force(batter, scored)
             return "E"
         if bip == "GB":
-            return self._ground_out(batter, scored)
+            runners = any(b)
+            result = self._ground_out(batter, scored)
+            if (
+                result in ("GO", "FC")
+                and runners
+                and self.outs < 3
+                and rng.random() < ERROR_ON_GB_OUT
+            ):
+                self._runner_error(scored)
+            return result
         self.outs += 1
         if bip == "FB" and self.outs < 3:
             go = (
@@ -1060,6 +1121,36 @@ class GameSim:
                     self._thrown_out(b[1], "3B")
                     b[1] = None
         return {"FB": "FO", "LD": "LO", "PU": "PO"}[bip]
+
+    def _throwing_error(self, batter: Runner, at: int, result: str) -> None:
+        """A throw on the hit gets away and the batter takes one more base (not on a
+        walk-off). His run is unearned: without the error he stops where the hit put him."""
+        if self._walkoff() or self.bases[at + 1] is not None or self.outs >= 3:
+            return
+        if self.rng.random() < THROWING_ERROR:
+            self.bases[at], self.bases[at + 1] = None, batter
+            batter.earned = False
+            self._throwing = True
+
+    def _runner_error(self, scored: list) -> None:
+        """A throw on a ground-ball out gets away: the lead runner takes one more base. His
+        run, if it scores, is unearned."""
+        b = self.bases
+        for at in (2, 1, 0):
+            runner = b[at]
+            if runner is None:
+                continue
+            if at == 2:
+                runner.earned = False
+                self._score(runner, scored)
+                b[2] = None
+            elif b[at + 1] is None:
+                b[at], b[at + 1] = None, runner
+                runner.earned = False
+            else:
+                continue
+            self._throwing = True
+            return
 
     def _send(self, runner: Runner, take: float, safe: float) -> bool | None:
         """Whether a runner goes for the extra base on a hit or a fly, and how
@@ -1112,8 +1203,11 @@ class GameSim:
         rng, b = self.rng, self.bases
         play = GROUND_BALL_PLAY.get(self.alignment, {})
         if b[0] and self.outs < 2:
-            dp = (0.42 - 0.06 * batter.hitter.speed) * play.get("double_play", 1.0)
-            if rng.random() < dp:
+            side = batter.hitter.side_vs(self._fielding().pitcher.throws)
+            dp = DOUBLE_PLAY[side] - 0.06 * batter.hitter.speed
+            if b[2]:
+                dp *= DOUBLE_PLAY_RUNNER_ON_THIRD
+            if rng.random() < dp * play.get("double_play", 1.0):
                 self.outs += 2
                 b[0] = None
                 if self.outs < 3:
@@ -1121,7 +1215,7 @@ class GameSim:
                         self._score(b[2], scored)
                     b[2], b[1] = b[1], None
                 return "DP"
-            if rng.random() < 0.35:  # fielder's choice: lead runner out at second
+            if rng.random() < FORCE_OUT:  # fielder's choice: lead runner out at second
                 self.outs += 1
                 if self.outs < 3:
                     if b[2] and rng.random() < min(0.5 * play.get("score_from_third", 1.0), 0.95):
