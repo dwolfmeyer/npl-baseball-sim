@@ -81,8 +81,16 @@ MOP_UP_RUNS = 7  # a reliever is pulled after allowing this many
 # becomes a chance before each PA he's on first with second open; tuned so a
 # league of average runners tries about as often as MLB in 2024-25 (0.96 a
 # team game, about one in ten of them for third).
-STEAL_PER_PA = 1.12
+STEAL_PER_PA = 0.95
 STEAL_THIRD = 0.6  # relative chance of trying for third from second
+# When they run (Retrosheet 2023 to 2025, runner on first with second open, relative to the
+# average): by the running team's lead from -6 to +6 or more, through the 6th inning and from
+# the 7th, then by outs. Nobody runs when well behind late, or far ahead.
+STEAL_BY_LEAD = {
+    False: (0.13, 0.32, 0.44, 0.64, 0.75, 1.02, 1.11, 1.23, 1.22, 1.27, 1.30, 1.30, 0.66),
+    True: (0.02, 0.10, 0.24, 0.28, 0.53, 1.28, 1.57, 1.62, 1.76, 1.78, 1.38, 1.06, 0.12),
+}
+STEAL_BY_OUTS = (0.83, 1.0, 1.12)
 # Success, on the log-odds scale: per unit of catcher arm (about 5 points of
 # success rate), the pitcher's hand holding the runner at first, the
 # easier steal of third, and per step of owner aggressiveness above normal.
@@ -714,10 +722,11 @@ class GameSim:
             runner, base = b[1], "3B"
         else:
             return
-        if run.steal <= 0 or runner.hitter.id in run.no_steal or not self._steal_spot(offense):
+        if run.steal <= 0 or runner.hitter.id in run.no_steal:
             return
         attempt, success = steal_odds(runner.hitter, self.env)
         chance = STEAL_PER_PA * attempt * run.steal * (STEAL_THIRD if base == "3B" else 1.0)
+        chance *= self._steal_timing(offense)
         if self.rng.random() >= chance:
             return
         logit = _logit(success) - STEAL_CATCHER * defense.defense.catcher_arm
@@ -749,11 +758,11 @@ class GameSim:
             odds={"attempt": round(chance, 4), "success": round(made, 4)},
         )
 
-    def _steal_spot(self, offense: _Side) -> bool:
-        """Baseball's custom: nobody runs with a big lead, or trailing by three
-        or more late, when an out costs more than the base gains."""
-        lead = offense.runs - self._fielding().runs
-        return lead < 5 and not (self.inning >= 7 and lead <= -3)
+    def _steal_timing(self, offense: _Side) -> float:
+        """How much more or less often runners go in this game state than on average."""
+        lead = min(max(offense.runs - self._fielding().runs, -6), 6)
+        late = STEAL_BY_LEAD[self.inning >= 7][lead + 6]
+        return late * STEAL_BY_OUTS[min(self.outs, 2)]
 
     def _maybe_wild_pitch(self) -> None:
         """A wild pitch, passed ball or balk: every runner moves up a base."""

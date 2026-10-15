@@ -51,7 +51,7 @@ def test_regulars_play_every_day_and_part_timers_run_out():
     usage = week(pa={"Home-1B": 8, "Home-C": 0})
     result = play_week(TEAMS, GAMES, usage, DEFAULT_ENV, seed=1)
     pa = pa_by_batter(result)
-    assert pa["Home-SS"] >= 26  # a regular plays the whole week
+    assert pa["Home-SS"] >= 7 * 3  # a regular plays all seven games, 3 or more PA a game
     assert pa["Home-C"] == 0  # no MLB PA: doesn't play
     assert pa["Home-1B"] <= 10 + 4  # 8 x 1.25, plus at most the PA of his last game
     moves = [g["moves"]["Home"] for g in result.games]

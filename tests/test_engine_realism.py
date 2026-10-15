@@ -337,3 +337,41 @@ def test_hits_to_the_outfield_name_the_fielder_the_baserunning_used():
             if e["type"] == "pa" and e["result"] in ("1B", "2B") and e["bip"] in ("LD", "FB"):
                 fields.add(e["fielder"])
     assert {"LF", "CF", "RF"} <= fields
+
+
+# Steal timing (item 12): Retrosheet 2023 to 2025, runner on first with second open. Attempt rate
+# relative to the average: tie game late 1.57, down 4+ late 0.24, up 6+ late 0.12; 0.83 with none
+# out, 1.12 with two out. Attempts per team-game still match the league (0.91 vs 0.91).
+def _timing(inning, lead, outs):
+    from npl_sim.engine.game import GameSim
+
+    from .test_engine import AWAY, HOME
+
+    sim = GameSim(AWAY, HOME, DEFAULT_ENV, 1)
+    sim.inning, sim.outs = inning, outs
+    sim.sides["away"].runs, sim.sides["home"].runs = lead, 0
+    return sim._steal_timing(sim.sides["away"])
+
+
+def test_steal_timing_follows_the_score_the_inning_and_the_outs():
+    assert _timing(8, 0, 1) == pytest.approx(1.57)
+    assert _timing(8, -4, 1) == pytest.approx(0.24)
+    assert _timing(8, 7, 1) == pytest.approx(0.12)
+    assert _timing(3, -4, 1) == pytest.approx(0.44)
+    assert _timing(3, 0, 0) == pytest.approx(1.11 * 0.83)
+    assert _timing(3, 0, 2) > _timing(3, 0, 0)
+
+
+def test_average_teams_still_attempt_steals_at_the_league_rate_with_timing():
+    from npl_sim.engine.game import simulate_game
+
+    from .test_engine import AWAY, HOME
+
+    attempts = games = 0
+    for seed in range(800):
+        games += 1
+        attempts += sum(
+            e["type"] in ("stolen_base", "caught_stealing")
+            for e in simulate_game(AWAY, HOME, DEFAULT_ENV, seed)
+        )
+    assert attempts / games / 2 == pytest.approx(0.91, rel=0.07)
