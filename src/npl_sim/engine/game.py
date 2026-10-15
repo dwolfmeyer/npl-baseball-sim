@@ -26,7 +26,6 @@ from npl_sim.engine.alignment import GROUND_BALL_PLAY, AlignmentRule, choose
 from npl_sim.engine.hooks import StarterHook
 from npl_sim.engine.manager import Baserunning, Bunting, PinchHitting, run_value
 from npl_sim.engine.model import (
-    LEAGUE_FATIGUE,
     Defense,
     LeagueEnv,
     ParkFactors,
@@ -75,6 +74,10 @@ ERROR_ON_GB_OUT = 0.055
 DEFAULT_ERROR_RATE = Defense().error_rate
 # Pitcher limits that no card setting can lift.
 MAX_PITCHES = 120
+# Mean workload (model.WORKLOAD_EFFECTS) over a starter's and a reliever's PAs; measured over
+# 1,000 average-team games. Milestone 8 should refit from real batters-faced distributions.
+STARTER_WORKLOAD = 0.71
+RELIEVER_WORKLOAD = 0.25
 NO_HITTER_PITCHES = 130  # a starter still working a no-hitter
 MOP_UP_RUNS = 7  # a reliever is pulled after allowing this many
 # Base stealing (_maybe_steal). A runner's attempt rate per time on first
@@ -678,13 +681,22 @@ class GameSim:
             outs=self.outs,
         )
 
+    def _typical(self, defense: _Side) -> float:
+        """The workload season rates already include for this pitcher's role."""
+        card, p = defense.card, defense.pitcher
+        return (
+            STARTER_WORKLOAD
+            if p.id == card.starter.id or p.id in card.follow
+            else RELIEVER_WORKLOAD
+        )
+
     def _fatigue(self, defense: _Side) -> float:
+        """Workload: batters faced / 18, plus half the late-pitch tail past 80% of the limit."""
         if not self.env.fatigue:
-            return LEAGUE_FATIGUE
+            return self._typical(defense)
         p = defense.pitcher
-        fatigue = max(0.0, (defense.pitches - 0.8 * p.pitch_limit) / (0.5 * p.pitch_limit))
-        fatigue += 0.12 * max(0, defense.batters_faced // 9 - 1)
-        return min(fatigue, 1.0)
+        tail = min(1.0, max(0.0, (defense.pitches - 0.8 * p.pitch_limit) / (0.5 * p.pitch_limit)))
+        return defense.batters_faced / 18 + 0.5 * tail
 
     def _expected_runs(self, hitter: Hitter, pitcher: Pitcher, defense: _Side) -> float:
         side = hitter.side_vs(pitcher.throws)
@@ -697,6 +709,7 @@ class GameSim:
             self.park,
             defense.defense,
             self._fatigue(defense),
+            typical=self._typical(defense),
         )
         return run_value(probs)
 
@@ -825,6 +838,7 @@ class GameSim:
             defense.defense,
             fatigue,
             self.alignment,
+            self._typical(defense),
         )
         if run_value(average) - run_value(probs) < rule.min_shortfall:
             return None
@@ -863,6 +877,7 @@ class GameSim:
             defense.defense,
             fatigue,
             self.alignment,
+            self._typical(defense),
         )
         bunt = self._bunt_odds(hitter, pitcher, side, probs, fatigue)
         if bunt is not None:
