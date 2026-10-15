@@ -41,7 +41,7 @@ GROUND_RULE_DOUBLE = 0.07
 # Chance of each before a PA with runners on, tuned to recent MLB (per team
 # game about 0.33 wild pitches, 0.05 passed balls, 0.03 balks); a wild
 # pitcher's chance scales with his walk rate.
-WILD_PITCH, PASSED_BALL, BALK = 0.019, 0.003, 0.0025
+WILD_PITCH, PASSED_BALL, BALK = 0.019, 0.003, 0.002
 # How a sacrifice-bunt attempt turns out: sacrifice, bunt single, lead runner
 # forced, popped up, double play, struck out on a foul bunt.
 BUNT_ODDS = {
