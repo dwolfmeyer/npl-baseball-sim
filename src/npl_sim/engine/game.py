@@ -53,6 +53,14 @@ BUNT_ODDS = {
     "K": 0.08,
 }
 HIT_BASES = {"1B": 1, "2B": 2, "3B": 3}
+# A ground ball that isn't a hit or an error, runner on first and fewer than two outs
+# (Retrosheet 2023 to 2025, 20,739 of them): 47.5% double plays (right-handed batters 52.8%,
+# left-handed 39.7%, 13% fewer with a runner on third), then 61% of the rest a force out at
+# second with the batter safe, and the rest a plain ground out. The 0.06 per unit of batter
+# speed is an estimate: Retrosheet has no sprint speed.
+DOUBLE_PLAY = {"R": 0.528, "L": 0.397}
+DOUBLE_PLAY_RUNNER_ON_THIRD = 0.87
+FORCE_OUT = 0.61
 # A throwing error on a single or double lets the batter take one more base (the official
 # scorer's error, but the batter doesn't reach on it). With the reach-on-error rate, about
 # 0.50 errors per team-game, the 2025 MLB level. Flagged for Milestone 8.
@@ -1180,8 +1188,11 @@ class GameSim:
         rng, b = self.rng, self.bases
         play = GROUND_BALL_PLAY.get(self.alignment, {})
         if b[0] and self.outs < 2:
-            dp = (0.42 - 0.06 * batter.hitter.speed) * play.get("double_play", 1.0)
-            if rng.random() < dp:
+            side = batter.hitter.side_vs(self._fielding().pitcher.throws)
+            dp = DOUBLE_PLAY[side] - 0.06 * batter.hitter.speed
+            if b[2]:
+                dp *= DOUBLE_PLAY_RUNNER_ON_THIRD
+            if rng.random() < dp * play.get("double_play", 1.0):
                 self.outs += 2
                 b[0] = None
                 if self.outs < 3:
@@ -1189,7 +1200,7 @@ class GameSim:
                         self._score(b[2], scored)
                     b[2], b[1] = b[1], None
                 return "DP"
-            if rng.random() < 0.35:  # fielder's choice: lead runner out at second
+            if rng.random() < FORCE_OUT:  # fielder's choice: lead runner out at second
                 self.outs += 1
                 if self.outs < 3:
                     if b[2] and rng.random() < min(0.5 * play.get("score_from_third", 1.0), 0.95):

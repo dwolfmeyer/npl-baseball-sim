@@ -259,3 +259,36 @@ def test_errors_per_team_game_match_retrosheet_by_kind():
     assert reach / tg == pytest.approx(0.221, rel=0.12)
     assert on_hit / tg == pytest.approx(0.114, rel=0.15)
     assert on_out / tg == pytest.approx(0.079, rel=0.20)
+
+
+# Double plays (item 9): Retrosheet 2023 to 2025, ground balls that aren't hits or errors with a
+# runner on first and fewer than two outs: 47.5% DP (RHB 52.8%, LHB 39.7%), 32% force out, 21% out.
+def test_ground_balls_with_a_runner_on_first_turn_into_double_plays_like_mlb():
+    from collections import Counter
+
+    from npl_sim.engine.game import simulate_game
+
+    from .test_engine import AWAY, HOME
+
+    bats = {h.id: h.bats for team in (AWAY, HOME) for h, _ in team.lineup}
+    shares = {"R": Counter(), "L": Counter()}
+    for seed in range(1500):
+        for e in simulate_game(AWAY, HOME, DEFAULT_ENV, seed):
+            if (
+                e["type"] == "pa"
+                and e["bip"] == "GB"
+                and not e.get("bunt")
+                and e["result"] in ("DP", "FC", "GO")
+                and e["bases_before"][0]
+                and not e["bases_before"][2]
+                and e["outs_before"] < 2
+                and bats.get(e["batter"]) in shares
+            ):
+                shares[bats[e["batter"]]][e["result"]] += 1
+    both = shares["R"] + shares["L"]
+    n = sum(both.values())
+    assert both["DP"] / n == pytest.approx(0.48, abs=0.03)
+    assert both["FC"] / n == pytest.approx(0.32, abs=0.03)
+    right = shares["R"]["DP"] / sum(shares["R"].values())
+    left = shares["L"]["DP"] / sum(shares["L"].values())
+    assert right - left == pytest.approx(0.13, abs=0.05)
