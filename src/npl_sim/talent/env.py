@@ -122,8 +122,8 @@ def _split_index(balls: pd.DataFrame, hit: dict) -> dict[tuple[str, str], tuple[
         for throws in HANDS:
             sub = balls[(balls["stand"] == bats) & (balls["p_throws"] == throws)]
             weight = sub["w"]
-            expected = (sub["bip"].map(sums) * weight).sum()
-            expected_xbh = (sub["bip"].map(xbh) * weight).sum()
+            expected = (sub["bip"].map(sums).astype(float) * weight).sum()
+            expected_xbh = (sub["bip"].map(xbh).astype(float) * weight).sum()
             if weight.sum() < 500 or expected <= 0 or expected_xbh <= 0:
                 continue
             seen = (sub["outcome"].isin(HITS) * weight).sum()

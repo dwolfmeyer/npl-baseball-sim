@@ -352,6 +352,13 @@ record falls back to his NPL roster position. Cards and
 games are stored as JSON under `NPL_WEB_DATA` (default `data/web`). Until the
 weekly MLB cards are wired in, every player sims at league-average rates.
 
+To open the app on an iPad or phone, either run it on a computer on the same
+Wi-Fi with `npl-sim web --host 0.0.0.0` and browse to that computer's address
+on port 8000, or host it on Render with the blueprint in `render.yaml`
+([deploy](https://render.com/deploy?repo=https://github.com/dwolfmeyer/npl-baseball-sim)).
+Render's free plan has no persistent disk, so saved cards and games reset when
+the service restarts, and the app has no login: anyone with the URL can edit.
+
 ### MLB data
 
 ```sh
