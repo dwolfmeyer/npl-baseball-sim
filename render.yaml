@@ -1,0 +1,14 @@
+# Render blueprint: hosts the web app so it can be opened from any browser,
+# including an iPad. Deploy from https://render.com/deploy?repo=https://github.com/dwolfmeyer/npl-baseball-sim
+services:
+  - type: web
+    name: npl-sim
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: pip install -e .
+    startCommand: npl-sim web --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
